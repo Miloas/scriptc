@@ -19,8 +19,8 @@ static void scr_console_methods_cleanup(void) {
 static ScrDyn *scr_console_method_call(ScrClosure *closure, ScrDyn *const *args, size_t argc) {
   if (argc > 1 && args[0]->kind == SCR_DYN_STR) {
     ScrStr *format = args[0]->v.str;
-    for (size_t i = 0; i + 1 < format->len; i++) if (format->data[i] == '%' &&
-        strchr("sdifjoOc%", format->data[i + 1])) {
+    for (size_t i = 0; i + 1 < scr_str_flat_view(format)->len; i++) if (scr_str_flat_view(format)->data[i] == '%' &&
+        strchr("sdifjoOc%", scr_str_flat_view(format)->data[i + 1])) {
       static const char message[] = "Format strings through stored console methods have no lowering";
       scr_throw_error_msg_code(SCR_ERR_ERROR, message, sizeof message - 1, "SC2020");
       return NULL;
@@ -161,8 +161,8 @@ static ScrDyn *scr_console_inst_invoke(void *ptr, ScrDyn *self, const char *key,
   if (which < 0) return scr_console_inst_get(ptr, key, strlen(key));
   if (argc > 1 && args[0]->kind == SCR_DYN_STR) {
     ScrStr *format = args[0]->v.str;
-    for (size_t i = 0; i + 1 < format->len; i++) if (format->data[i] == '%' &&
-        strchr("sdifjoOc%", format->data[i + 1])) {
+    for (size_t i = 0; i + 1 < scr_str_flat_view(format)->len; i++) if (scr_str_flat_view(format)->data[i] == '%' &&
+        strchr("sdifjoOc%", scr_str_flat_view(format)->data[i + 1])) {
       static const char message[] = "Format strings through dynamic Console calls have no lowering";
       scr_throw_error_msg_code(SCR_ERR_ERROR, message, sizeof message - 1, "SC2020");
       return NULL;
@@ -265,7 +265,7 @@ static void scr_console_stores_cleanup(void) {
 static ScrConsoleSlot *scr_console_find(ScrConsoleStore *store, const ScrStr *label) {
   for (size_t i = 0; i < store->len; i++) {
     ScrStr *key = store->slots[i].label;
-    if (key->len == label->len && memcmp(key->data, label->data, label->len) == 0)
+    if (scr_str_flat_view(key)->len == scr_str_flat_view(label)->len && memcmp(scr_str_flat_view(key)->data, scr_str_flat_view(label)->data, scr_str_flat_view(label)->len) == 0)
       return &store->slots[i];
   }
   return NULL;
@@ -319,12 +319,12 @@ void scr_console_count(ScrStr *label) {
   slot->count++;
   char digits[40];
   size_t n = scr_f64_to_str(slot->count, digits);
-  size_t total = label->len + 2 + n;
+  size_t total = scr_str_flat_view(label)->len + 2 + n;
   char *line = malloc(total);
   if (!line) scr_trap("scriptc: out of memory\n");
-  memcpy(line, label->data, label->len);
-  memcpy(line + label->len, ": ", 2);
-  memcpy(line + label->len + 2, digits, n);
+  memcpy(line, scr_str_flat_view(label)->data, scr_str_flat_view(label)->len);
+  memcpy(line + scr_str_flat_view(label)->len, ": ", 2);
+  memcpy(line + scr_str_flat_view(label)->len + 2, digits, n);
   ScrStr *text = scr_str_new(line, total);
   free(line);
   scr_console_print(text);
@@ -334,12 +334,12 @@ void scr_console_count(ScrStr *label) {
 /* "<prefix><label><suffix>" — the warning texts. */
 static ScrStr *scr_console_message(const char *prefix, const ScrStr *label, const char *suffix) {
   size_t a = strlen(prefix), c = strlen(suffix);
-  size_t total = a + label->len + c;
+  size_t total = a + scr_str_flat_view(label)->len + c;
   char *text = malloc(total ? total : 1);
   if (!text) scr_trap("scriptc: out of memory\n");
   memcpy(text, prefix, a);
-  memcpy(text + a, label->data, label->len);
-  memcpy(text + a + label->len, suffix, c);
+  memcpy(text + a, scr_str_flat_view(label)->data, scr_str_flat_view(label)->len);
+  memcpy(text + a + scr_str_flat_view(label)->len, suffix, c);
   ScrStr *out = scr_str_new(text, total);
   free(text);
   return out;
@@ -650,7 +650,7 @@ static ScrDyn *scr_table_own_value(const ScrDyn *item, const ScrStr *key) {
   if (item->kind == SCR_DYN_OBJ) {
     for (size_t i = 0; i < item->v.obj.len; i++) {
       const ScrDynEntry *ent = &item->v.obj.entries[i];
-      if (ent->key_len != key->len || memcmp(ent->key, key->data, key->len) != 0) continue;
+      if (ent->key_len != scr_str_flat_view(key)->len || memcmp(ent->key, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len) != 0) continue;
       if (ent->accessor) {
         scr_table_fence("console.table rows with accessor properties have no lowering");
         return NULL;
@@ -661,9 +661,9 @@ static ScrDyn *scr_table_own_value(const ScrDyn *item, const ScrStr *key) {
   }
   if (item->kind == SCR_DYN_ARR || item->kind == SCR_DYN_BYTES) {
     size_t len = item->kind == SCR_DYN_ARR ? item->v.arr.len : item->v.bytes->len;
-    if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return scr_dyn_new_num((double)len);
+    if (scr_str_flat_view(key)->len == 6 && memcmp(scr_str_flat_view(key)->data, "length", 6) == 0) return scr_dyn_new_num((double)len);
     uint32_t index;
-    if (!scr_table_index_key(key->data, key->len, &index) || index >= len) return NULL;
+    if (!scr_table_index_key(scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, &index) || index >= len) return NULL;
     if (item->kind == SCR_DYN_ARR) return scr_dyn_retain(item->v.arr.items[index]);
     return scr_dyn_new_num(scr_bytes_get(item->v.bytes, (double)index));
   }
@@ -673,7 +673,7 @@ static ScrDyn *scr_table_own_value(const ScrDyn *item, const ScrStr *key) {
 static ScrTableColumn *scr_table_column(ScrTable *t, ScrStr *key) {
   for (size_t i = 0; i < t->len; i++) {
     ScrStr *k = t->cols[i].key;
-    if (k->len == key->len && memcmp(k->data, key->data, key->len) == 0) return &t->cols[i];
+    if (scr_str_flat_view(k)->len == scr_str_flat_view(key)->len && memcmp(scr_str_flat_view(k)->data, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len) == 0) return &t->cols[i];
   }
   if (t->len == t->cap) {
     size_t cap = t->cap ? t->cap * 2 : 8;
@@ -720,14 +720,14 @@ static void scr_tb_repeat(ScrTableBuf *b, const char *s, size_t times) {
 }
 
 static size_t scr_table_width(const ScrStr *s) {
-  return s ? scr_insp_display_width(s->data, s->len) : 0;
+  return s ? scr_insp_display_width(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len) : 0;
 }
 
 /* renderRow: cells left-justified to their column widths. */
 static void scr_table_row(ScrTableBuf *b, ScrStr *const *cells, const size_t *widths, size_t n) {
   scr_tb_cstr(b, "\xe2\x94\x82 ");
   for (size_t i = 0; i < n; i++) {
-    if (cells[i]) scr_tb_put(b, cells[i]->data, cells[i]->len);
+    if (cells[i]) scr_tb_put(b, scr_str_flat_view(cells[i])->data, scr_str_flat_view(cells[i])->len);
     scr_tb_repeat(b, " ", widths[i] - scr_table_width(cells[i]));
     if (i + 1 != n) scr_tb_cstr(b, " \xe2\x94\x82 ");
   }
@@ -869,8 +869,8 @@ void scr_console_table(ScrDyn *data_in, ScrDyn *properties) {
     ScrStr ***columns = calloc(n + 2, sizeof *columns);
     if (!names || !lens || !order || !head || !columns) scr_trap("scriptc: out of memory\n");
     for (size_t i = 0; i < n; i++) {
-      names[i] = t.cols[i].key->data;
-      lens[i] = t.cols[i].key->len;
+      names[i] = scr_str_flat_view(t.cols[i].key)->data;
+      lens[i] = scr_str_flat_view(t.cols[i].key)->len;
     }
     scr_table_key_order(names, lens, n, order);
     ScrStr *index_head = scr_str_new("(index)", 7);

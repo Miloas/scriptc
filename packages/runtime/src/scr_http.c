@@ -276,15 +276,15 @@ ScrHttpReq *scr_http_req_retain(ScrHttpReq *r) {
  * the "not supported yet" Error; unknown names throw Node's
  * ERR_UNKNOWN_ENCODING TypeError. */
 void scr_http_req_set_encoding(ScrHttpReq *r, ScrStr *enc /*borrowed*/) {
-  if ((enc->len == 4 && memcmp(enc->data, "utf8", 4) == 0) ||
-      (enc->len == 5 && memcmp(enc->data, "utf-8", 5) == 0)) {
+  if ((scr_str_flat_view(enc)->len == 4 && memcmp(scr_str_flat_view(enc)->data, "utf8", 4) == 0) ||
+      (scr_str_flat_view(enc)->len == 5 && memcmp(scr_str_flat_view(enc)->data, "utf-8", 5) == 0)) {
     r->enc_utf8 = true;
     return;
   }
   static const char *const known[] = { "ascii", "latin1", "binary", "base64",
     "base64url", "hex", "ucs2", "ucs-2", "utf16le", "utf-16le", NULL };
   for (size_t i = 0; known[i]; i++) {
-    if (enc->len == strlen(known[i]) && memcmp(enc->data, known[i], enc->len) == 0) {
+    if (scr_str_flat_view(enc)->len == strlen(known[i]) && memcmp(scr_str_flat_view(enc)->data, known[i], scr_str_flat_view(enc)->len) == 0) {
       char msg[128];
       int n = snprintf(msg, sizeof msg, "setEncoding('%s') is not supported yet (only 'utf8' here)",
                        known[i]);
@@ -294,7 +294,7 @@ void scr_http_req_set_encoding(ScrHttpReq *r, ScrStr *enc /*borrowed*/) {
   }
   char msg[128];
   int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",
-                   (int)(enc->len < 64 ? enc->len : 64), enc->data);
+                   (int)(scr_str_flat_view(enc)->len < 64 ? scr_str_flat_view(enc)->len : 64), scr_str_flat_view(enc)->data);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_UNKNOWN_ENCODING");
 }
 
@@ -348,9 +348,9 @@ ScrStr *scr_http_req_method(ScrHttpReq *r) { return scr_str_retain(r->method); }
 /* Case-insensitive equality of HTTP field names. Incoming names happen to
  * be lowercased already; outgoing names retain the spelling of the setter. */
 static bool scr_http_name_eq(const ScrStr *lower, const ScrStr *name) {
-  if (lower->len != name->len) return false;
-  for (size_t j = 0; j < name->len; j++) {
-    if (tolower((unsigned char)lower->data[j]) != tolower((unsigned char)name->data[j])) return false;
+  if (scr_str_flat_view(lower)->len != scr_str_flat_view(name)->len) return false;
+  for (size_t j = 0; j < scr_str_flat_view(name)->len; j++) {
+    if (tolower((unsigned char)scr_str_flat_view(lower)->data[j]) != tolower((unsigned char)scr_str_flat_view(name)->data[j])) return false;
   }
   return true;
 }
@@ -370,11 +370,11 @@ static ScrStr *scr_http_field_value(ScrStr *const *names, ScrStr *const *values,
   size_t total = 0, n = 0;
   for (size_t i = 0; i < count; i++) {
     if (!scr_http_name_eq(names[i], name)) continue;
-    total += values[i]->len;
+    total += scr_str_flat_view(values[i])->len;
     n++;
   }
   if (n == 1) return scr_str_retain(values[index]);
-  bool cookie = name->len == 6 && memcmp(name->data, "cookie", 6) == 0;
+  bool cookie = scr_str_flat_view(name)->len == 6 && memcmp(scr_str_flat_view(name)->data, "cookie", 6) == 0;
   const char *sep = cookie ? "; " : ", ";
   char *buf = malloc(total + (n - 1) * 2);
   if (!buf) scr_http_oom();
@@ -385,8 +385,8 @@ static ScrStr *scr_http_field_value(ScrStr *const *names, ScrStr *const *values,
       memcpy(buf + off, sep, 2);
       off += 2;
     }
-    memcpy(buf + off, values[i]->data, values[i]->len);
-    off += values[i]->len;
+    memcpy(buf + off, scr_str_flat_view(values[i])->data, scr_str_flat_view(values[i])->len);
+    off += scr_str_flat_view(values[i])->len;
   }
   ScrStr *value = scr_str_new(buf, off);
   free(buf);
@@ -468,7 +468,7 @@ static bool scr_http_trailer_single_value(const ScrStr *name) {
     "if-unmodified-since", "last-modified", "location", "max-forwards",
     "proxy-authorization", "referer", "retry-after", "server", "user-agent", NULL };
   for (size_t i = 0; names[i]; i++) {
-    if (name->len == strlen(names[i]) && memcmp(name->data, names[i], name->len) == 0) return true;
+    if (scr_str_flat_view(name)->len == strlen(names[i]) && memcmp(scr_str_flat_view(name)->data, names[i], scr_str_flat_view(name)->len) == 0) return true;
   }
   return false;
 }
@@ -810,24 +810,24 @@ static bool scr_http_token_char(unsigned char ch) {
  * as OutgoingMessage. Strings are UTF-8 here, so the Latin-1 obs-text
  * range accepted by Node's JS regex is C2/C3 plus one continuation byte. */
 void scr_http_validate_header_name(ScrStr *name /*borrowed*/, ScrStr *label /*borrowed*/) {
-  bool valid = name->len > 0;
-  for (size_t i = 0; i < name->len && valid; i++)
-    valid = scr_http_token_char((unsigned char)name->data[i]);
+  bool valid = scr_str_flat_view(name)->len > 0;
+  for (size_t i = 0; i < scr_str_flat_view(name)->len && valid; i++)
+    valid = scr_http_token_char((unsigned char)scr_str_flat_view(name)->data[i]);
   if (valid) return;
 
   ScrJsonBuf b;
   scr_jb_init(&b);
-  ScrStr *shown = label->len ? label : NULL;
+  ScrStr *shown = scr_str_flat_view(label)->len ? label : NULL;
   if (shown) {
-    scr_jb_write(&b, shown->data, shown->len);
+    scr_jb_write(&b, scr_str_flat_view(shown)->data, scr_str_flat_view(shown)->len);
   } else {
     scr_jb_puts(&b, "Header name");
   }
   scr_jb_puts(&b, " must be a valid HTTP token [\"");
-  scr_jb_write(&b, name->data, name->len);
+  scr_jb_write(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
   scr_jb_puts(&b, "\"]");
   ScrStr *msg = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_INVALID_HTTP_TOKEN");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_INVALID_HTTP_TOKEN");
   scr_str_release(msg);
 }
 
@@ -836,10 +836,10 @@ void scr_http_validate_header_value(ScrStr *name /*borrowed*/, const ScrDyn *val
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, "Invalid value \"undefined\" for header \"");
-    scr_jb_write(&b, name->data, name->len);
+    scr_jb_write(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     scr_jb_putc(&b, '"');
     ScrStr *msg = scr_jb_finish(&b);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_HTTP_INVALID_HEADER_VALUE");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_HTTP_INVALID_HEADER_VALUE");
     scr_str_release(msg);
     return;
   }
@@ -847,12 +847,12 @@ void scr_http_validate_header_value(ScrStr *name /*borrowed*/, const ScrDyn *val
   ScrStr *s = scr_dyn_string_coerce_js(value);
   if (!s) return; /* object coercion threw */
   bool invalid = false;
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char ch = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char ch = (unsigned char)scr_str_flat_view(s)->data[i];
     if (ch == '\t' || (ch >= 0x20 && ch <= 0x7e)) continue;
-    if ((ch == 0xc2 || ch == 0xc3) && i + 1 < s->len &&
-        (unsigned char)s->data[i + 1] >= 0x80 &&
-        (unsigned char)s->data[i + 1] <= 0xbf) {
+    if ((ch == 0xc2 || ch == 0xc3) && i + 1 < scr_str_flat_view(s)->len &&
+        (unsigned char)scr_str_flat_view(s)->data[i + 1] >= 0x80 &&
+        (unsigned char)scr_str_flat_view(s)->data[i + 1] <= 0xbf) {
       i++;
       continue;
     }
@@ -865,10 +865,10 @@ void scr_http_validate_header_value(ScrStr *name /*borrowed*/, const ScrDyn *val
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_puts(&b, "Invalid character in header content [\"");
-  scr_jb_write(&b, name->data, name->len);
+  scr_jb_write(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
   scr_jb_puts(&b, "\"]");
   ScrStr *msg = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_INVALID_CHAR");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_INVALID_CHAR");
   scr_str_release(msg);
 }
 
@@ -886,22 +886,22 @@ static bool scr_http_trailers_replace(ScrHttpTrailers *t, ScrArr *pairs /*borrow
   for (size_t i = 0; i < n; i += 2) {
     ScrStr *name = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
     ScrStr *value = (ScrStr *)scr_arr_get_ref(pairs, (double)(i + 1));
-    bool valid = name->len > 0;
-    for (size_t j = 0; j < name->len; j++) valid &= scr_http_token_char((unsigned char)name->data[j]);
+    bool valid = scr_str_flat_view(name)->len > 0;
+    for (size_t j = 0; j < scr_str_flat_view(name)->len; j++) valid &= scr_http_token_char((unsigned char)scr_str_flat_view(name)->data[j]);
     if (!valid) {
       char msg[256];
       int len = snprintf(msg, sizeof msg, "Trailer name must be a valid HTTP token [\"%.*s\"]",
-                         (int)(name->len < 160 ? name->len : 160), name->data);
+                         (int)(scr_str_flat_view(name)->len < 160 ? scr_str_flat_view(name)->len : 160), scr_str_flat_view(name)->data);
       scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_HTTP_TOKEN");
     } else {
-      for (size_t j = 0; j < value->len; j++) {
-        unsigned char ch = (unsigned char)value->data[j];
+      for (size_t j = 0; j < scr_str_flat_view(value)->len; j++) {
+        unsigned char ch = (unsigned char)scr_str_flat_view(value)->data[j];
         if ((ch < 32 && ch != '\t') || ch == 127) { valid = false; break; }
       }
       if (!valid) {
         char msg[256];
         int len = snprintf(msg, sizeof msg, "Invalid character in trailer content [\"%.*s\"]",
-                           (int)(name->len < 160 ? name->len : 160), name->data);
+                           (int)(scr_str_flat_view(name)->len < 160 ? scr_str_flat_view(name)->len : 160), scr_str_flat_view(name)->data);
         scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_CHAR");
       }
     }
@@ -1033,19 +1033,19 @@ static bool scr_http_res_expected_length(ScrHttpRes *r, double *expected) {
   if (!r->strict_content_length || r->h2_stream || r->chunked ||
       (r->status >= 100 && r->status < 200) || r->status == 204 || r->status == 304 ||
       scr_http_res_has_header(r, "transfer-encoding")) return false;
-  if (r->req_ref && r->req_ref->method && r->req_ref->method->len == 4 &&
-      memcmp(r->req_ref->method->data, "HEAD", 4) == 0) return false;
+  if (r->req_ref && r->req_ref->method && scr_str_flat_view(r->req_ref->method)->len == 4 &&
+      memcmp(scr_str_flat_view(r->req_ref->method)->data, "HEAD", 4) == 0) return false;
   for (size_t i = 0; i < r->nheaders; i++) {
-    if (r->hnames[i]->len != 14) continue;
+    if (scr_str_flat_view(r->hnames[i])->len != 14) continue;
     bool match = true;
     for (size_t j = 0; j < 14; j++) {
-      if (tolower((unsigned char)r->hnames[i]->data[j]) != "content-length"[j]) {
+      if (tolower((unsigned char)scr_str_flat_view(r->hnames[i])->data[j]) != "content-length"[j]) {
         match = false;
         break;
       }
     }
     if (!match) continue;
-    *expected = strtod(r->hvalues[i]->data, NULL);
+    *expected = strtod(scr_str_flat_view(r->hvalues[i])->data, NULL);
     return true;
   }
   return false;
@@ -1105,7 +1105,7 @@ static ScrDyn *scr_http_out_value(ScrStr *const *names, ScrStr *const *values, c
   size_t n = 0;
   for (size_t i = first; i < count; i++) n += scr_http_name_eq(names[i], names[first]);
   uint8_t kind = kinds ? kinds[first] : SCR_HTTP_HV_STR;
-  if (n == 1 && kind == SCR_HTTP_HV_NUM) return scr_dyn_new_num(strtod(values[first]->data, NULL));
+  if (n == 1 && kind == SCR_HTTP_HV_NUM) return scr_dyn_new_num(strtod(scr_str_flat_view(values[first])->data, NULL));
   if (n == 1 && kind == SCR_HTTP_HV_STR) return scr_dyn_new_str(values[first]);
   ScrDyn *list = scr_dyn_new_arr();
   for (size_t i = first; i < count; i++) {
@@ -1135,9 +1135,9 @@ static ScrArr *scr_http_out_header_names(ScrStr **names, size_t count, bool raw)
     if (raw) {
       scr_arr_push_ref(out, scr_str_retain(names[i]));
     } else {
-      ScrStr *lower = scr_str_new(names[i]->data, names[i]->len);
-      for (size_t j = 0; j < lower->len; j++)
-        lower->data[j] = (char)tolower((unsigned char)lower->data[j]);
+      ScrStr *lower = scr_str_new(scr_str_flat_view(names[i])->data, scr_str_flat_view(names[i])->len);
+      for (size_t j = 0; j < scr_str_flat_view(lower)->len; j++)
+        scr_str_flat_view(lower)->data[j] = (char)tolower((unsigned char)scr_str_flat_view(lower)->data[j]);
       scr_arr_push_ref(out, lower);
     }
   }
@@ -1153,10 +1153,10 @@ static ScrDyn *scr_http_out_headers(ScrStr **names, ScrStr **values, const uint8
     bool seen = false;
     for (size_t j = 0; j < i && !seen; j++) seen = scr_http_name_eq(names[j], names[i]);
     if (seen) continue;
-    ScrStr *lower = scr_str_new(names[i]->data, names[i]->len);
-    for (size_t j = 0; j < lower->len; j++)
-      lower->data[j] = (char)tolower((unsigned char)lower->data[j]);
-    scr_dyn_obj_set(out, lower->data, lower->len, scr_http_out_value(names, values, kinds, count, i));
+    ScrStr *lower = scr_str_new(scr_str_flat_view(names[i])->data, scr_str_flat_view(names[i])->len);
+    for (size_t j = 0; j < scr_str_flat_view(lower)->len; j++)
+      scr_str_flat_view(lower)->data[j] = (char)tolower((unsigned char)scr_str_flat_view(lower)->data[j]);
+    scr_dyn_obj_set(out, scr_str_flat_view(lower)->data, scr_str_flat_view(lower)->len, scr_http_out_value(names, values, kinds, count, i));
     scr_str_release(lower);
   }
   return out;
@@ -1210,10 +1210,10 @@ void scr_http_res_remove_header(ScrHttpRes *r, ScrStr *name) {
 static bool scr_http_res_has_header(ScrHttpRes *r, const char *name) {
   size_t len = strlen(name);
   for (size_t i = 0; i < r->nheaders; i++) {
-    if (r->hnames[i]->len == len) {
+    if (scr_str_flat_view(r->hnames[i])->len == len) {
       bool eq = true;
       for (size_t j = 0; j < len && eq; j++) {
-        if (tolower((unsigned char)r->hnames[i]->data[j]) != tolower((unsigned char)name[j])) eq = false;
+        if (tolower((unsigned char)scr_str_flat_view(r->hnames[i])->data[j]) != tolower((unsigned char)name[j])) eq = false;
       }
       if (eq) return true;
     }
@@ -1266,10 +1266,10 @@ static ScrStr *scr_http_header_value_text(const ScrStr *name, const ScrDyn *v) {
   scr_jb_puts(&b, "Invalid value \"");
   scr_jb_puts(&b, v->kind == SCR_DYN_UNDEF ? "undefined" : "object");
   scr_jb_puts(&b, "\" for header \"");
-  scr_jb_write(&b, name->data, name->len);
+  scr_jb_write(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
   scr_jb_putc(&b, '"');
   ScrStr *msg = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_HTTP_INVALID_HEADER_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_HTTP_INVALID_HEADER_VALUE");
   scr_str_release(msg);
   return NULL;
 }
@@ -1389,9 +1389,9 @@ static void scr_http_buf_uint(ScrHttpBuf *b, unsigned long long v) {
 /* ASCII case-insensitive name compare against a lowercase literal. */
 static bool scr_http_name_is(const ScrStr *name, const char *lower) {
   size_t len = strlen(lower);
-  if (name->len != len) return false;
+  if (scr_str_flat_view(name)->len != len) return false;
   for (size_t i = 0; i < len; i++) {
-    if (tolower((unsigned char)name->data[i]) != lower[i]) return false;
+    if (tolower((unsigned char)scr_str_flat_view(name)->data[i]) != lower[i]) return false;
   }
   return true;
 }
@@ -1400,14 +1400,14 @@ static bool scr_http_name_is(const ScrStr *name, const char *lower) {
  * The header validator allows Latin-1 obs-text; collapse its UTF-8 C2/C3
  * spelling back to one wire byte. */
 static void scr_http_buf_header_value(ScrHttpBuf *b, const ScrStr *s) {
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char ch = (unsigned char)s->data[i];
-    if ((ch == 0xc2 || ch == 0xc3) && i + 1 < s->len) {
-      unsigned char next = (unsigned char)s->data[++i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char ch = (unsigned char)scr_str_flat_view(s)->data[i];
+    if ((ch == 0xc2 || ch == 0xc3) && i + 1 < scr_str_flat_view(s)->len) {
+      unsigned char next = (unsigned char)scr_str_flat_view(s)->data[++i];
       char byte = (char)(((ch & 1) << 6) | (next & 0x3f));
       scr_http_buf_append(b, &byte, 1);
     } else {
-      scr_http_buf_append(b, s->data + i, 1);
+      scr_http_buf_append(b, scr_str_flat_view(s)->data + i, 1);
     }
   }
 }
@@ -1434,28 +1434,28 @@ void scr_http_res_write_processing(ScrHttpRes *r) {
  * optional semicolon parameters. Its string arm refuses an empty or
  * malformed link before the general header-content check runs. */
 static bool scr_http_early_link_format(const ScrStr *link) {
-  if (link->len < 2 || link->data[0] != '<') return false;
+  if (scr_str_flat_view(link)->len < 2 || scr_str_flat_view(link)->data[0] != '<') return false;
   size_t i = 1;
-  while (i < link->len && link->data[i] != '>') {
-    if (link->data[i] == '\r' || link->data[i] == '\n') return false;
+  while (i < scr_str_flat_view(link)->len && scr_str_flat_view(link)->data[i] != '>') {
+    if (scr_str_flat_view(link)->data[i] == '\r' || scr_str_flat_view(link)->data[i] == '\n') return false;
     i++;
   }
-  if (i == link->len) return false;
+  if (i == scr_str_flat_view(link)->len) return false;
   i++;
-  while (i < link->len) {
-    while (i < link->len && isspace((unsigned char)link->data[i])) i++;
-    if (i == link->len || link->data[i++] != ';') return false;
-    while (i < link->len && isspace((unsigned char)link->data[i])) i++;
+  while (i < scr_str_flat_view(link)->len) {
+    while (i < scr_str_flat_view(link)->len && isspace((unsigned char)scr_str_flat_view(link)->data[i])) i++;
+    if (i == scr_str_flat_view(link)->len || scr_str_flat_view(link)->data[i++] != ';') return false;
+    while (i < scr_str_flat_view(link)->len && isspace((unsigned char)scr_str_flat_view(link)->data[i])) i++;
     size_t start = i;
-    while (i < link->len && link->data[i] != ';' && link->data[i] != '"' &&
-           !isspace((unsigned char)link->data[i])) i++;
+    while (i < scr_str_flat_view(link)->len && scr_str_flat_view(link)->data[i] != ';' && scr_str_flat_view(link)->data[i] != '"' &&
+           !isspace((unsigned char)scr_str_flat_view(link)->data[i])) i++;
     if (i == start) return false;
-    if (i < link->len && link->data[i] == '"') {
-      if (link->data[i - 1] != '=') return false;
+    if (i < scr_str_flat_view(link)->len && scr_str_flat_view(link)->data[i] == '"') {
+      if (scr_str_flat_view(link)->data[i - 1] != '=') return false;
       i++;
-      while (i < link->len && link->data[i] != ';' && link->data[i] != '"' &&
-             !isspace((unsigned char)link->data[i])) i++;
-      if (i == link->len || link->data[i++] != '"') return false;
+      while (i < scr_str_flat_view(link)->len && scr_str_flat_view(link)->data[i] != ';' && scr_str_flat_view(link)->data[i] != '"' &&
+             !isspace((unsigned char)scr_str_flat_view(link)->data[i])) i++;
+      if (i == scr_str_flat_view(link)->len || scr_str_flat_view(link)->data[i++] != '"') return false;
     }
   }
   return true;
@@ -1471,7 +1471,7 @@ void scr_http_res_write_early_hints(ScrHttpRes *r, ScrArr *pairs /*borrowed*/) {
   ScrStr *link = NULL;
   for (size_t i = 0; i + 1 < count; i += 2) {
     ScrStr *name = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
-    if (name->len == 4 && memcmp(name->data, "link", 4) == 0) {
+    if (scr_str_flat_view(name)->len == 4 && memcmp(scr_str_flat_view(name)->data, "link", 4) == 0) {
       scr_str_release(link);
       link = (ScrStr *)scr_arr_get_ref(pairs, (double)(i + 1));
     }
@@ -1503,7 +1503,7 @@ void scr_http_res_write_early_hints(ScrHttpRes *r, ScrArr *pairs /*borrowed*/) {
   for (size_t i = 0; i + 1 < count; i += 2) {
     ScrStr *name = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
     ScrStr *value = (ScrStr *)scr_arr_get_ref(pairs, (double)(i + 1));
-    if (name->len == 4 && memcmp(name->data, "link", 4) == 0) {
+    if (scr_str_flat_view(name)->len == 4 && memcmp(scr_str_flat_view(name)->data, "link", 4) == 0) {
       scr_str_release(name);
       scr_str_release(value);
       continue;
@@ -1521,7 +1521,7 @@ void scr_http_res_write_early_hints(ScrHttpRes *r, ScrArr *pairs /*borrowed*/) {
       free(b.data);
       return;
     }
-    scr_http_buf_append(&b, name->data, name->len);
+    scr_http_buf_append(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     scr_http_buf_str(&b, ": ");
     scr_http_buf_header_value(&b, value);
     scr_http_buf_str(&b, "\r\n");
@@ -1537,9 +1537,9 @@ void scr_http_res_write_early_hints(ScrHttpRes *r, ScrArr *pairs /*borrowed*/) {
 static void scr_http_buf_chunk_end(ScrHttpBuf *b, const ScrHttpTrailers *t) {
   scr_http_buf_str(b, "0\r\n");
   for (size_t i = 0; i < t->len; i++) {
-    scr_http_buf_append(b, t->names[i]->data, t->names[i]->len);
+    scr_http_buf_append(b, scr_str_flat_view(t->names[i])->data, scr_str_flat_view(t->names[i])->len);
     scr_http_buf_str(b, ": ");
-    scr_http_buf_append(b, t->values[i]->data, t->values[i]->len);
+    scr_http_buf_append(b, scr_str_flat_view(t->values[i])->data, scr_str_flat_view(t->values[i])->len);
     scr_http_buf_str(b, "\r\n");
   }
   scr_http_buf_str(b, "\r\n");
@@ -1577,20 +1577,20 @@ static void scr_http_buf_date(ScrHttpBuf *b) {
 
 static bool scr_http_header_has_token(const ScrStr *value, const char *token) {
   size_t token_len = strlen(token);
-  for (size_t off = 0; off < value->len;) {
-    while (off < value->len &&
-           (value->data[off] == ',' || value->data[off] == ' ' || value->data[off] == '\t')) off++;
+  for (size_t off = 0; off < scr_str_flat_view(value)->len;) {
+    while (off < scr_str_flat_view(value)->len &&
+           (scr_str_flat_view(value)->data[off] == ',' || scr_str_flat_view(value)->data[off] == ' ' || scr_str_flat_view(value)->data[off] == '\t')) off++;
     size_t end = off;
-    while (end < value->len && value->data[end] != ',' &&
-           value->data[end] != ' ' && value->data[end] != '\t') end++;
+    while (end < scr_str_flat_view(value)->len && scr_str_flat_view(value)->data[end] != ',' &&
+           scr_str_flat_view(value)->data[end] != ' ' && scr_str_flat_view(value)->data[end] != '\t') end++;
     if (end - off == token_len) {
       bool equal = true;
       for (size_t i = 0; i < token_len && equal; i++) {
-        if (tolower((unsigned char)value->data[off + i]) != token[i]) equal = false;
+        if (tolower((unsigned char)scr_str_flat_view(value)->data[off + i]) != token[i]) equal = false;
       }
       if (equal) return true;
     }
-    while (end < value->len && value->data[end] != ',') end++;
+    while (end < scr_str_flat_view(value)->len && scr_str_flat_view(value)->data[end] != ',') end++;
     off = end;
   }
   return false;
@@ -1633,7 +1633,7 @@ static bool scr_http_res_build_head(ScrHttpRes *r, long long body_len, ScrHttpBu
   /* the assigned reason phrase wins (writeHead's statusMessage argument /
    * the res.statusMessage assignment — "" serializes as an empty phrase,
    * Node's "HTTP/1.1 200 " line) */
-  if (r->status_msg) scr_http_buf_append(&b, r->status_msg->data, r->status_msg->len);
+  if (r->status_msg) scr_http_buf_append(&b, scr_str_flat_view(r->status_msg)->data, scr_str_flat_view(r->status_msg)->len);
   else scr_http_buf_str(&b, scr_http_reason(status));
   scr_http_buf_str(&b, "\r\n");
   /* One pass serializes the user headers and notes the framing-relevant
@@ -1642,11 +1642,11 @@ static bool scr_http_res_build_head(ScrHttpRes *r, long long body_len, ScrHttpBu
   bool have_len = false, declared_trailer = false;
   for (size_t i = 0; i < r->nheaders; i++) {
     const ScrStr *name = r->hnames[i];
-    scr_http_buf_append(&b, name->data, name->len);
+    scr_http_buf_append(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     scr_http_buf_str(&b, ": ");
-    scr_http_buf_append(&b, r->hvalues[i]->data, r->hvalues[i]->len);
+    scr_http_buf_append(&b, scr_str_flat_view(r->hvalues[i])->data, scr_str_flat_view(r->hvalues[i])->len);
     scr_http_buf_str(&b, "\r\n");
-    switch (name->len) {
+    switch (scr_str_flat_view(name)->len) {
     case 4: have_date = have_date || scr_http_name_is(name, "date"); break;
     case 7: declared_trailer = declared_trailer || scr_http_name_is(name, "trailer"); break;
     case 10: have_connection = have_connection || scr_http_name_is(name, "connection"); break;
@@ -1670,8 +1670,8 @@ static bool scr_http_res_build_head(ScrHttpRes *r, long long body_len, ScrHttpBu
   /* Node's _hasBody: a HEAD request or a 1xx, 204 or 304 status sends no
    * body and no framing header; write() and end() data are dropped. */
   r->no_body = (status >= 100 && status < 200) || status == 204 || status == 304 ||
-               (r->req_ref != NULL && r->req_ref->method != NULL && r->req_ref->method->len == 4 &&
-                memcmp(r->req_ref->method->data, "HEAD", 4) == 0);
+               (r->req_ref != NULL && r->req_ref->method != NULL && scr_str_flat_view(r->req_ref->method)->len == 4 &&
+                memcmp(scr_str_flat_view(r->req_ref->method)->data, "HEAD", 4) == 0);
   bool unframed = !have_len && (r->no_body || (r->req_ref != NULL && r->req_ref->http10));
   if (unframed && !r->no_body) r->keep_alive = false;
   bool user_close = false;
@@ -1814,17 +1814,17 @@ static void scr_http_res_autocork(ScrHttpRes *r) {
 void scr_http_res_write_str(ScrHttpRes *r, ScrStr *data /*borrowed*/) {
   double expected;
   if (r->head_sent && scr_http_res_expected_length(r, &expected) &&
-      (double)(r->strict_bytes_written + data->len) > expected) {
-    r->strict_bytes_written += data->len;
+      (double)(r->strict_bytes_written + scr_str_flat_view(data)->len) > expected) {
+    r->strict_bytes_written += scr_str_flat_view(data)->len;
     scr_http_res_length_mismatch(r, expected);
-    r->strict_bytes_written -= data->len;
+    r->strict_bytes_written -= scr_str_flat_view(data)->len;
     return;
   }
-  if (r->strict_content_length) r->strict_bytes_written += data->len;
+  if (r->strict_content_length) r->strict_bytes_written += scr_str_flat_view(data)->len;
   scr_http_res_autocork(r);
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_http_res_write_raw(r, bytes, data->len);
+  scr_http_res_write_raw(r, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -1964,7 +1964,7 @@ void scr_http_res_end(ScrHttpRes *r) { scr_http_res_end_raw(r, "", 0); }
 void scr_http_res_end_str(ScrHttpRes *r, ScrStr *data /*borrowed*/) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_http_res_end_raw(r, bytes, data->len);
+  scr_http_res_end_raw(r, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -2050,10 +2050,10 @@ void scr_http_res_write_head_pairs(ScrHttpRes *r, double status, ScrArr *pairs /
     bool repeat = false;
     for (size_t j = 0; j < i && !repeat; j += 2) {
       ScrStr *prev = (ScrStr *)scr_arr_get_ref(pairs, (double)j);
-      if (prev->len == name->len) {
+      if (scr_str_flat_view(prev)->len == scr_str_flat_view(name)->len) {
         bool eq = true;
-        for (size_t k = 0; k < name->len && eq; k++) {
-          if (tolower((unsigned char)prev->data[k]) != tolower((unsigned char)name->data[k])) eq = false;
+        for (size_t k = 0; k < scr_str_flat_view(name)->len && eq; k++) {
+          if (tolower((unsigned char)scr_str_flat_view(prev)->data[k]) != tolower((unsigned char)scr_str_flat_view(name)->data[k])) eq = false;
         }
         repeat = eq;
       }
@@ -2830,12 +2830,12 @@ static void scr_http_conn_body_done(ScrHttpConn *conn) {
 static bool scr_http_expects_continue(const ScrStr *value) {
   static const char token[] = "100-continue";
   size_t n = sizeof token - 1;
-  for (size_t i = 0; i + n <= value->len; i++) {
-    bool before = i == 0 || !(isalnum((unsigned char)value->data[i - 1]) || value->data[i - 1] == '_');
+  for (size_t i = 0; i + n <= scr_str_flat_view(value)->len; i++) {
+    bool before = i == 0 || !(isalnum((unsigned char)scr_str_flat_view(value)->data[i - 1]) || scr_str_flat_view(value)->data[i - 1] == '_');
     size_t end = i + n;
-    bool after = end == value->len || !(isalnum((unsigned char)value->data[end]) || value->data[end] == '_');
+    bool after = end == scr_str_flat_view(value)->len || !(isalnum((unsigned char)scr_str_flat_view(value)->data[end]) || scr_str_flat_view(value)->data[end] == '_');
     bool match = before && after;
-    for (size_t k = 0; k < n && match; k++) match = tolower((unsigned char)value->data[i + k]) == token[k];
+    for (size_t k = 0; k < n && match; k++) match = tolower((unsigned char)scr_str_flat_view(value)->data[i + k]) == token[k];
     if (match) return true;
   }
   return false;
@@ -2900,8 +2900,8 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len, bool *o
     scr_http_req_add_header(req, p, (size_t)(colon - p), v, (size_t)(ve - v));
     p = eol + 2;
   }
-  size_t header_size = req->url->len;
-  for (size_t i = 0; i < req->nheaders; i++) header_size += req->hnames[i]->len + req->hvalues[i]->len;
+  size_t header_size = scr_str_flat_view(req->url)->len;
+  for (size_t i = 0; i < req->nheaders; i++) header_size += scr_str_flat_view(req->hnames[i])->len + scr_str_flat_view(req->hvalues[i])->len;
   if (!ok || req->nheaders > SCR_HTTP_MAX_HEADER_FIELDS || header_size >= scr_http_conn_header_limit(conn)) {
     *overflow = ok;
     scr_http_req_release(req);
@@ -2915,7 +2915,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len, bool *o
     bool has_host = false;
     for (size_t i = 0; i < req->nheaders; i++) {
       const ScrStr *name = req->hnames[i];
-      if (name->len == 4 && memcmp(name->data, "host", 4) == 0) {
+      if (scr_str_flat_view(name)->len == 4 && memcmp(scr_str_flat_view(name)->data, "host", 4) == 0) {
         has_host = true;
         break;
       }
@@ -2936,18 +2936,18 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len, bool *o
   for (size_t i = 0; i < req->nheaders; i++) {
     const ScrStr *n = req->hnames[i];
     const ScrStr *v = req->hvalues[i];
-    if (n->len == 17 && memcmp(n->data, "transfer-encoding", 17) == 0) {
-      if (v->len >= 7 && strstr(v->data, "chunked") != NULL) chunked = true;
-    } else if (n->len == 14 && memcmp(n->data, "content-length", 14) == 0) {
-      content_length = atoll(v->data);
+    if (scr_str_flat_view(n)->len == 17 && memcmp(scr_str_flat_view(n)->data, "transfer-encoding", 17) == 0) {
+      if (scr_str_flat_view(v)->len >= 7 && strstr(scr_str_flat_view(v)->data, "chunked") != NULL) chunked = true;
+    } else if (scr_str_flat_view(n)->len == 14 && memcmp(scr_str_flat_view(n)->data, "content-length", 14) == 0) {
+      content_length = atoll(scr_str_flat_view(v)->data);
       if (content_length < 0) content_length = 0;
-    } else if (n->len == 7 && memcmp(n->data, "upgrade", 7) == 0) {
+    } else if (scr_str_flat_view(n)->len == 7 && memcmp(scr_str_flat_view(n)->data, "upgrade", 7) == 0) {
       has_upgrade_hdr = true;
-    } else if (n->len == 10 && memcmp(n->data, "connection", 10) == 0) {
+    } else if (scr_str_flat_view(n)->len == 10 && memcmp(scr_str_flat_view(n)->data, "connection", 10) == 0) {
       /* token scan, case-insensitive enough for close/keep-alive */
-      if (strcasestr(v->data, "upgrade") != NULL) conn_upgrade_token = true;
-      if (strcasestr(v->data, "close") != NULL) req_keep_alive = false;
-      else if (strcasestr(v->data, "keep-alive") != NULL) req_keep_alive = true;
+      if (strcasestr(scr_str_flat_view(v)->data, "upgrade") != NULL) conn_upgrade_token = true;
+      if (strcasestr(scr_str_flat_view(v)->data, "close") != NULL) req_keep_alive = false;
+      else if (strcasestr(scr_str_flat_view(v)->data, "keep-alive") != NULL) req_keep_alive = true;
     }
   }
 
@@ -2956,7 +2956,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len, bool *o
    * steps aside; no listener destroys the socket, Node's default). The
    * h2 compat server's HTTP/1.1 arm lands here too; its HTTP/2 arm is
    * dispatched separately with the compatibility response handle. */
-  if (req->method->len == 7 && memcmp(req->method->data, "CONNECT", 7) == 0) {
+  if (scr_str_flat_view(req->method)->len == 7 && memcmp(scr_str_flat_view(req->method)->data, "CONNECT", 7) == 0) {
     memmove(conn->buf, conn->buf + head_len, conn->len - head_len);
     conn->len -= head_len;
     if (!scr_net_ls_has_live(&conn->srv->connect_ls)) {
@@ -3058,7 +3058,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len, bool *o
   ScrNetLs *handlers = &conn->srv->request_ls;
   const ScrStr *expect = NULL;
   for (size_t i = 0; i < req->nheaders && !http10; i++) {
-    if (req->hnames[i]->len == 6 && memcmp(req->hnames[i]->data, "expect", 6) == 0) {
+    if (scr_str_flat_view(req->hnames[i])->len == 6 && memcmp(scr_str_flat_view(req->hnames[i])->data, "expect", 6) == 0) {
       expect = req->hvalues[i];
       break;
     }
@@ -3458,7 +3458,7 @@ static void scr_http_on_connection(void *ctx, ScrNetSocket *sock) {
 void scr_http2_stream_undef_call(ScrStr *member) {
   char msg[128];
   int n = snprintf(msg, sizeof msg, "Cannot read properties of undefined (reading '%.*s')",
-                   (int)member->len, member->data);
+                   (int)scr_str_flat_view(member)->len, scr_str_flat_view(member)->data);
   scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
 }
 
@@ -3606,7 +3606,7 @@ void scr_http_h2_req_line(ScrHttpReq *r, ScrStr *method /*borrowed, nullable*/,
 }
 
 void scr_http_h2_req_header(ScrHttpReq *r, ScrStr *name /*borrowed*/, ScrStr *value /*borrowed*/) {
-  scr_http_req_add_header(r, name->data, name->len, value->data, value->len);
+  scr_http_req_add_header(r, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
 }
 
 void scr_http_h2_req_data(ScrHttpReq *r, const char *data, size_t n) {
@@ -3992,10 +3992,10 @@ static void scr_http_client_error(ScrHttpClientReq *c, ScrStr *msg /*borrowed*/)
 static bool scr_http_client_has_header(ScrHttpClientReq *c, const char *name) {
   size_t len = strlen(name);
   for (size_t i = 0; i < c->nheaders; i++) {
-    if (c->hnames[i]->len == len) {
+    if (scr_str_flat_view(c->hnames[i])->len == len) {
       bool eq = true;
       for (size_t j = 0; j < len && eq; j++) {
-        if (tolower((unsigned char)c->hnames[i]->data[j]) != tolower((unsigned char)name[j])) eq = false;
+        if (tolower((unsigned char)scr_str_flat_view(c->hnames[i])->data[j]) != tolower((unsigned char)name[j])) eq = false;
       }
       if (eq) return true;
     }
@@ -4005,9 +4005,9 @@ static bool scr_http_client_has_header(ScrHttpClientReq *c, const char *name) {
 
 static bool scr_http_header_name_is(ScrStr *name, const char *text) {
   size_t len = strlen(text);
-  if (name->len != len) return false;
+  if (scr_str_flat_view(name)->len != len) return false;
   for (size_t i = 0; i < len; i++)
-    if (tolower((unsigned char)name->data[i]) != text[i]) return false;
+    if (tolower((unsigned char)scr_str_flat_view(name)->data[i]) != text[i]) return false;
   return true;
 }
 
@@ -4125,28 +4125,28 @@ static bool scr_http_agent_keeps_alive(const struct ScrHttpAgent *a);
 static void scr_http_client_send_head(ScrHttpClientReq *c, long long body_len) {
   if (c->head_sent) return;
   ScrHttpBuf b = {NULL, 0, 0};
-  scr_http_buf_append(&b, c->method->data, c->method->len);
+  scr_http_buf_append(&b, scr_str_flat_view(c->method)->data, scr_str_flat_view(c->method)->len);
   scr_http_buf_str(&b, " ");
-  scr_http_buf_append(&b, c->path->data, c->path->len);
+  scr_http_buf_append(&b, scr_str_flat_view(c->path)->data, scr_str_flat_view(c->path)->len);
   scr_http_buf_str(&b, " HTTP/1.1\r\n");
   for (size_t i = 0; i < c->nheaders; i++) {
-    scr_http_buf_append(&b, c->hnames[i]->data, c->hnames[i]->len);
+    scr_http_buf_append(&b, scr_str_flat_view(c->hnames[i])->data, scr_str_flat_view(c->hnames[i])->len);
     scr_http_buf_str(&b, ": ");
-    scr_http_buf_append(&b, c->hvalues[i]->data, c->hvalues[i]->len);
+    scr_http_buf_append(&b, scr_str_flat_view(c->hvalues[i])->data, scr_str_flat_view(c->hvalues[i])->len);
     scr_http_buf_str(&b, "\r\n");
-    bool transfer = c->hnames[i]->len == 17;
+    bool transfer = scr_str_flat_view(c->hnames[i])->len == 17;
     for (size_t j = 0; j < 17 && transfer; j++) {
-      if (tolower((unsigned char)c->hnames[i]->data[j]) != "transfer-encoding"[j]) transfer = false;
+      if (tolower((unsigned char)scr_str_flat_view(c->hnames[i])->data[j]) != "transfer-encoding"[j]) transfer = false;
     }
     if (transfer && scr_http_header_has_token(c->hvalues[i], "chunked")) c->chunked = true;
   }
   if (!c->removed_host && !scr_http_client_has_header(c, "host")) {
     /* Host: name[:port] — the scheme's default port omitted (80 http,
      * 443 https), IPv6 literals bracketed (Node) */
-    bool v6 = memchr(c->host->data, ':', c->host->len) != NULL;
+    bool v6 = memchr(scr_str_flat_view(c->host)->data, ':', scr_str_flat_view(c->host)->len) != NULL;
     scr_http_buf_str(&b, "Host: ");
     if (v6) scr_http_buf_str(&b, "[");
-    scr_http_buf_append(&b, c->host->data, c->host->len);
+    scr_http_buf_append(&b, scr_str_flat_view(c->host)->data, scr_str_flat_view(c->host)->len);
     if (v6) scr_http_buf_str(&b, "]");
     if (c->port != c->default_port) {
       char pbuf[16];
@@ -4173,9 +4173,9 @@ static void scr_http_client_send_head(ScrHttpClientReq *c, long long body_len) {
       /* empty body: POST/PUT/PATCH send Content-Length: 0, everything
        * else sends no framing header at all — Node's method split */
       const ScrStr *m = c->method;
-      bool bodied = (m->len == 4 && memcmp(m->data, "POST", 4) == 0) ||
-                    (m->len == 3 && memcmp(m->data, "PUT", 3) == 0) ||
-                    (m->len == 5 && memcmp(m->data, "PATCH", 5) == 0);
+      bool bodied = (scr_str_flat_view(m)->len == 4 && memcmp(scr_str_flat_view(m)->data, "POST", 4) == 0) ||
+                    (scr_str_flat_view(m)->len == 3 && memcmp(scr_str_flat_view(m)->data, "PUT", 3) == 0) ||
+                    (scr_str_flat_view(m)->len == 5 && memcmp(scr_str_flat_view(m)->data, "PATCH", 5) == 0);
       if (bodied) scr_http_buf_str(&b, "Content-Length: 0\r\n");
     }
   }
@@ -4259,7 +4259,7 @@ void scr_http_client_write_str(ScrHttpClientReq *c, ScrStr *data /*borrowed*/) {
   scr_http_client_autocork(c);
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_http_client_write_raw(c, bytes, data->len);
+  scr_http_client_write_raw(c, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -4326,7 +4326,7 @@ void scr_http_client_end(ScrHttpClientReq *c) { scr_http_client_end_raw(c, "", 0
 void scr_http_client_end_str(ScrHttpClientReq *c, ScrStr *data /*borrowed*/) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_http_client_end_raw(c, bytes, data->len);
+  scr_http_client_end_raw(c, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -4667,8 +4667,8 @@ static bool scr_http_client_parse_head(ScrHttpConn *conn, size_t head_len) {
     scr_http_req_add_header(res, p, (size_t)(colon - p), v, (size_t)(ve - v));
     p = eol + 2;
   }
-  size_t header_size = res->status_msg->len;
-  for (size_t i = 0; i < res->nheaders; i++) header_size += res->hnames[i]->len + res->hvalues[i]->len;
+  size_t header_size = scr_str_flat_view(res->status_msg)->len;
+  for (size_t i = 0; i < res->nheaders; i++) header_size += scr_str_flat_view(res->hnames[i])->len + scr_str_flat_view(res->hvalues[i])->len;
   if (!ok || res->nheaders > SCR_HTTP_MAX_HEADER_FIELDS || header_size >= scr_http_conn_header_limit(conn)) {
     conn->header_overflow = ok;
     scr_http_req_release(res);
@@ -4699,14 +4699,14 @@ static bool scr_http_client_parse_head(ScrHttpConn *conn, size_t head_len) {
   for (size_t i = 0; i < res->nheaders; i++) {
     const ScrStr *n = res->hnames[i];
     const ScrStr *v = res->hvalues[i];
-    if (n->len == 17 && memcmp(n->data, "transfer-encoding", 17) == 0) {
-      if (strstr(v->data, "chunked") != NULL) chunked = true;
-    } else if (n->len == 14 && memcmp(n->data, "content-length", 14) == 0) {
-      content_length = atoll(v->data);
+    if (scr_str_flat_view(n)->len == 17 && memcmp(scr_str_flat_view(n)->data, "transfer-encoding", 17) == 0) {
+      if (strstr(scr_str_flat_view(v)->data, "chunked") != NULL) chunked = true;
+    } else if (scr_str_flat_view(n)->len == 14 && memcmp(scr_str_flat_view(n)->data, "content-length", 14) == 0) {
+      content_length = atoll(scr_str_flat_view(v)->data);
       if (content_length < 0) content_length = 0;
     }
   }
-  bool head_req = c->method->len == 4 && memcmp(c->method->data, "HEAD", 4) == 0;
+  bool head_req = scr_str_flat_view(c->method)->len == 4 && memcmp(scr_str_flat_view(c->method)->data, "HEAD", 4) == 0;
   bool no_body = head_req || status == 204 || status == 304;
 
   /* 101 Switching Protocols: 'upgrade' fires INSTEAD of 'response' with
@@ -4998,9 +4998,9 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
    * ERR_INVALID_HTTP_TOKEN TypeError with Node's exact message, the raw
    * method text inside the quotes. Moved-in arguments release — the
    * request never exists. */
-  bool method_ok = method->len > 0;
-  for (size_t i = 0; i < method->len && method_ok; i++) {
-    unsigned char ch = (unsigned char)method->data[i];
+  bool method_ok = scr_str_flat_view(method)->len > 0;
+  for (size_t i = 0; i < scr_str_flat_view(method)->len && method_ok; i++) {
+    unsigned char ch = (unsigned char)scr_str_flat_view(method)->data[i];
     method_ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                 (ch >= '0' && ch <= '9') ||
                 (ch != 0 && strchr("!#$%&'*+-.^_`|~", ch) != NULL);
@@ -5011,10 +5011,10 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, "Method must be a valid HTTP token [\"");
-    scr_jb_write(&b, method->data, method->len);
+    scr_jb_write(&b, scr_str_flat_view(method)->data, scr_str_flat_view(method)->len);
     scr_jb_puts(&b, "\"]");
     ScrStr *msg = scr_jb_finish(&b);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_INVALID_HTTP_TOKEN");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_INVALID_HTTP_TOKEN");
     scr_str_release(msg);
     return NULL;
   }
@@ -5047,9 +5047,9 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
     /* Node queues the implicit Host header at construction, so all three
      * outgoing header readers see it before end()/flushHeaders(). */
     ScrHttpBuf hostbuf = {NULL, 0, 0};
-    bool v6 = memchr(c->host->data, ':', c->host->len) != NULL;
+    bool v6 = memchr(scr_str_flat_view(c->host)->data, ':', scr_str_flat_view(c->host)->len) != NULL;
     if (v6) scr_http_buf_str(&hostbuf, "[");
-    scr_http_buf_append(&hostbuf, c->host->data, c->host->len);
+    scr_http_buf_append(&hostbuf, scr_str_flat_view(c->host)->data, scr_str_flat_view(c->host)->len);
     if (v6) scr_http_buf_str(&hostbuf, "]");
     if (c->port != c->default_port) {
       char portbuf[16];
@@ -5238,14 +5238,14 @@ static void scr_http_agent_release_v(void *p) { scr_http_agent_release((ScrHttpA
 static size_t scr_http_agent_active(const ScrHttpAgent *a, const ScrStr *name) {
   size_t n = 0;
   for (const ScrHttpAgentEnt *e = a->ents; e; e = e->next) {
-    if (!e->queued && e->name->len == name->len &&
-        memcmp(e->name->data, name->data, name->len) == 0) n++;
+    if (!e->queued && scr_str_flat_view(e->name)->len == scr_str_flat_view(name)->len &&
+        memcmp(scr_str_flat_view(e->name)->data, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len) == 0) n++;
   }
   return n;
 }
 
 static bool scr_http_name_same(const ScrStr *a, const ScrStr *b) {
-  return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  return scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len) == 0;
 }
 
 static size_t scr_http_agent_free_count(const ScrHttpAgent *a, const ScrStr *name) {
@@ -5372,14 +5372,14 @@ static double scr_http_response_keep_alive(ScrHttpReq *res, const struct ScrHttp
     } else if (scr_http_header_name_is((ScrStr *)n, "content-length") ||
                scr_http_header_name_is((ScrStr *)n, "transfer-encoding")) {
       framed = true;
-    } else if (scr_http_header_name_is((ScrStr *)n, "keep-alive") && v->len > 8 &&
-               memcmp(v->data, "timeout=", 8) == 0 && isdigit((unsigned char)v->data[8])) {
+    } else if (scr_http_header_name_is((ScrStr *)n, "keep-alive") && scr_str_flat_view(v)->len > 8 &&
+               memcmp(scr_str_flat_view(v)->data, "timeout=", 8) == 0 && isdigit((unsigned char)scr_str_flat_view(v)->data[8])) {
       double seconds = 0;
-      for (size_t k = 8; k < v->len && isdigit((unsigned char)v->data[k]); k++) seconds = seconds * 10 + (v->data[k] - '0');
+      for (size_t k = 8; k < scr_str_flat_view(v)->len && isdigit((unsigned char)scr_str_flat_view(v)->data[k]); k++) seconds = seconds * 10 + (scr_str_flat_view(v)->data[k] - '0');
       hint = seconds * 1000;
     }
   }
-  bool head = c->method->len == 4 && memcmp(c->method->data, "HEAD", 4) == 0;
+  bool head = scr_str_flat_view(c->method)->len == 4 && memcmp(scr_str_flat_view(c->method)->data, "HEAD", 4) == 0;
   bool bodiless = head || res->status == 204 || res->status == 304 || (res->status >= 100 && res->status < 200);
   if (!keep || (!framed && !bodiless)) return -2;
   return hint;
@@ -5446,8 +5446,8 @@ static void scr_http_agent_client_done(struct ScrHttpAgent *ag, struct ScrHttpCl
   }
   if (name != NULL && !ag->destroyed) {
     for (ScrHttpAgentEnt *e = ag->ents; e; e = e->next) {
-      if (e->queued && e->name->len == name->len &&
-          memcmp(e->name->data, name->data, name->len) == 0) {
+      if (e->queued && scr_str_flat_view(e->name)->len == scr_str_flat_view(name)->len &&
+          memcmp(scr_str_flat_view(e->name)->data, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len) == 0) {
         ScrHttpAgentFree *f = scr_http_agent_free_take(ag, name, e->client->pool_key);
         if (f != NULL) {
           e->queued = false;
@@ -5498,8 +5498,8 @@ ScrDyn *scr_http_agent_new(bool secure, bool keep_alive, double ka_msecs,
   bool fifo = false;
   if (scheduling != NULL && scr_dyn_truthy(scheduling)) {
     const ScrStr *s = scheduling->kind == SCR_DYN_STR ? scheduling->v.str : NULL;
-    if (s != NULL && s->len == 4 && memcmp(s->data, "fifo", 4) == 0) fifo = true;
-    else if (s == NULL || s->len != 4 || memcmp(s->data, "lifo", 4) != 0) {
+    if (s != NULL && scr_str_flat_view(s)->len == 4 && memcmp(scr_str_flat_view(s)->data, "fifo", 4) == 0) fifo = true;
+    else if (s == NULL || scr_str_flat_view(s)->len != 4 || memcmp(scr_str_flat_view(s)->data, "lifo", 4) != 0) {
       scr_dyn_arg_value_fail("scheduling", "must be one of: 'fifo', 'lifo'", scheduling);
       return NULL;
     }
@@ -5594,10 +5594,10 @@ ScrHttpClientReq *scr_http_request_agent_ex(ScrStr *host /*borrowed*/, double po
     size_t npairs = (size_t)scr_arr_len(header_pairs);
     for (size_t i = 0; i + 1 < npairs && !has_conn; i += 2) {
       ScrStr *n = (ScrStr *)scr_arr_get_ref(header_pairs, (double)i);
-      if (n->len == 10) {
+      if (scr_str_flat_view(n)->len == 10) {
         bool eq = true;
         for (size_t j = 0; j < 10 && eq; j++) {
-          if (tolower((unsigned char)n->data[j]) != "connection"[j]) eq = false;
+          if (tolower((unsigned char)scr_str_flat_view(n)->data[j]) != "connection"[j]) eq = false;
         }
         has_conn = eq;
       }
@@ -5628,7 +5628,7 @@ ScrHttpClientReq *scr_http_request_agent_ex(ScrStr *host /*borrowed*/, double po
            : (double)default_port;
   char portbuf[16];
   int portn = snprintf(portbuf, sizeof portbuf, "%d", (int)p);
-  ScrStr *name = scr_http_agent_name(host->data, host->len, portbuf, (size_t)portn,
+  ScrStr *name = scr_http_agent_name(scr_str_flat_view(host)->data, scr_str_flat_view(host)->len, portbuf, (size_t)portn,
                                       NULL, 0, 0, NULL, 0);
   /* a free pooled socket for the name serves the request right away */
   ScrHttpAgentFree *reuse = ag->keep_alive ? scr_http_agent_free_take(ag, name, pool_key) : NULL;
@@ -5764,7 +5764,7 @@ static void scr_http_dynh_event_unsupported(const char *cls, const ScrDyn *name)
   scr_jb_init(&b);
   scr_jb_puts(&b, "listening for '");
   if (name->kind == SCR_DYN_STR) {
-    scr_jb_write(&b, name->v.str->data, name->v.str->len);
+    scr_jb_write(&b, scr_str_flat_view(name->v.str)->data, scr_str_flat_view(name->v.str)->len);
   }
   scr_jb_puts(&b, "' on a dynamic ");
   scr_jb_puts(&b, cls);
@@ -5774,8 +5774,8 @@ static void scr_http_dynh_event_unsupported(const char *cls, const ScrDyn *name)
 
 static bool scr_http_dynh_name_is(const ScrDyn *name, const char *lit) {
   size_t n = strlen(lit);
-  return name->kind == SCR_DYN_STR && name->v.str->len == n &&
-         memcmp(name->v.str->data, lit, n) == 0;
+  return name->kind == SCR_DYN_STR && scr_str_flat_view(name->v.str)->len == n &&
+         memcmp(scr_str_flat_view(name->v.str)->data, lit, n) == 0;
 }
 
 static bool scr_http_dynh_in(const char *m, const char *const *names) {
@@ -5821,19 +5821,19 @@ static bool scr_http_dynh_encode(const ScrDyn *chunk, const ScrDyn *enc, ScrByte
     scr_jb_init(&b);
     scr_jb_puts(&b, "Unknown encoding: ");
     if (enc->kind == SCR_DYN_STR) {
-      for (size_t i = 0; i < enc->v.str->len && i < 64; i++) scr_jb_putc(&b, enc->v.str->data[i]);
+      for (size_t i = 0; i < scr_str_flat_view(enc->v.str)->len && i < 64; i++) scr_jb_putc(&b, scr_str_flat_view(enc->v.str)->data[i]);
     }
     ScrStr *msg = scr_jb_finish(&b);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_UNKNOWN_ENCODING");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_UNKNOWN_ENCODING");
     scr_str_release(msg);
     return false;
   }
   if (chunk->kind != SCR_DYN_STR) return true; /* buffers carry their bytes */
   /* lowercase + alias normalization down to scr_bytes_from_str's arms */
   char low[10];
-  size_t n = enc->v.str->len < 9 ? enc->v.str->len : 9;
+  size_t n = scr_str_flat_view(enc->v.str)->len < 9 ? scr_str_flat_view(enc->v.str)->len : 9;
   for (size_t i = 0; i < n; i++) {
-    char c = enc->v.str->data[i];
+    char c = scr_str_flat_view(enc->v.str)->data[i];
     low[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
   }
   low[n] = 0;
@@ -5991,8 +5991,8 @@ static ScrDyn *scr_http_dynh_req_get(void *h, const char *key, size_t key_len) {
        * the per-name read's rule (scr_http_req_header), so h.headers.x
        * and h.headers['x'] agree; joinDuplicateHeaders pairs arrive
        * pre-joined and unique. */
-      if (!scr_dyn_obj_get(obj, name->data, name->len)) {
-        scr_dyn_obj_set(obj, name->data, name->len, scr_dyn_new_str(value));
+      if (!scr_dyn_obj_get(obj, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len)) {
+        scr_dyn_obj_set(obj, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, scr_dyn_new_str(value));
       }
       scr_str_release(name);
       scr_str_release(value);
@@ -6086,7 +6086,7 @@ static ScrArr *scr_http_dynh_pairs(const ScrDyn *headers) {
         for (size_t c = 0; c < e->key_len; c++) scr_jb_putc(&b, e->key[c]);
         scr_jb_putc(&b, '"');
         ScrStr *msg = scr_jb_finish(&b);
-        scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_HTTP_INVALID_HEADER_VALUE");
+        scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_HTTP_INVALID_HEADER_VALUE");
         scr_str_release(msg);
         scr_arr_release(pairs);
         return NULL;
@@ -6132,15 +6132,15 @@ static ScrArr *scr_http_dynh_flat_pairs(const ScrDyn *list) {
         scr_jb_puts(&b, "Invalid value \"");
         scr_jb_puts(&b, one->kind == SCR_DYN_UNDEF ? "undefined" : "object");
         scr_jb_puts(&b, "\" for header \"");
-        scr_jb_write(&b, k->v.str->data, k->v.str->len);
+        scr_jb_write(&b, scr_str_flat_view(k->v.str)->data, scr_str_flat_view(k->v.str)->len);
         scr_jb_putc(&b, '"');
         ScrStr *msg = scr_jb_finish(&b);
-        scr_throw_error_msg_code(SCR_ERR_TYPE, msg->data, msg->len, "ERR_HTTP_INVALID_HEADER_VALUE");
+        scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(msg)->data, scr_str_flat_view(msg)->len, "ERR_HTTP_INVALID_HEADER_VALUE");
         scr_str_release(msg);
         scr_arr_release(pairs);
         return NULL;
       }
-      scr_arr_push_ref(pairs, scr_str_new(k->v.str->data, k->v.str->len));
+      scr_arr_push_ref(pairs, scr_str_new(scr_str_flat_view(k->v.str)->data, scr_str_flat_view(k->v.str)->len));
       scr_arr_push_ref(pairs, vs);
     }
   }
@@ -6713,11 +6713,11 @@ static ScrDyn *scr_http_dynh_agent_invoke(void *h, ScrDyn *self, const char *met
         family = (int)f->v.num;
       }
     }
-    ScrStr *name = scr_http_agent_name(host ? host->data : NULL, host ? host->len : 0,
-                                        port ? port->data : NULL, port ? port->len : 0,
-                                        laddr ? laddr->data : NULL, laddr ? laddr->len : 0,
-                                        family, spath ? spath->data : NULL,
-                                        spath ? spath->len : 0);
+    ScrStr *name = scr_http_agent_name(host ? scr_str_flat_view(host)->data : NULL, host ? scr_str_flat_view(host)->len : 0,
+                                        port ? scr_str_flat_view(port)->data : NULL, port ? scr_str_flat_view(port)->len : 0,
+                                        laddr ? scr_str_flat_view(laddr)->data : NULL, laddr ? scr_str_flat_view(laddr)->len : 0,
+                                        family, spath ? scr_str_flat_view(spath)->data : NULL,
+                                        spath ? scr_str_flat_view(spath)->len : 0);
     scr_str_release(host);
     scr_str_release(port);
     scr_str_release(laddr);
@@ -6763,11 +6763,11 @@ static ScrDyn *scr_http_dynh_agent_table(ScrHttpAgent *a, bool queued) {
         ? scr_dyn_new_handle(e->client, SCR_DYNH_HTTP_CLIENT)
         : e->client->sock ? scr_dyn_new_handle(e->client->sock, SCR_DYNH_NET_SOCKET) : NULL;
     if (item == NULL) continue;
-    ScrDyn *arr = scr_dyn_obj_get(obj, e->name->data, e->name->len); /* borrowed */
+    ScrDyn *arr = scr_dyn_obj_get(obj, scr_str_flat_view(e->name)->data, scr_str_flat_view(e->name)->len); /* borrowed */
     if (arr == NULL || arr->kind != SCR_DYN_ARR) {
       ScrDyn *fresh = scr_dyn_new_arr();
       scr_dyn_arr_push(fresh, item); /* moves */
-      scr_dyn_obj_set(obj, e->name->data, e->name->len, fresh); /* moves */
+      scr_dyn_obj_set(obj, scr_str_flat_view(e->name)->data, scr_str_flat_view(e->name)->len, fresh); /* moves */
     } else {
       scr_dyn_arr_push(arr, item); /* moves */
     }
@@ -6801,10 +6801,10 @@ static ScrDyn *scr_http_dynh_agent_get(void *h, const char *key, size_t key_len)
     /* { name: [socket, ...] }, oldest first like Node's arrays */
     ScrDyn *obj = scr_dyn_new_obj();
     for (ScrHttpAgentFree *f = a->free_socks; f; f = f->next) {
-      ScrDyn *arr = scr_dyn_obj_get(obj, f->name->data, f->name->len);
+      ScrDyn *arr = scr_dyn_obj_get(obj, scr_str_flat_view(f->name)->data, scr_str_flat_view(f->name)->len);
       if (arr == NULL) {
         arr = scr_dyn_new_arr();
-        scr_dyn_obj_set(obj, f->name->data, f->name->len, arr);
+        scr_dyn_obj_set(obj, scr_str_flat_view(f->name)->data, scr_str_flat_view(f->name)->len, arr);
       }
       ScrDyn *item = scr_dyn_new_handle(f->sock, SCR_DYNH_NET_SOCKET);
       scr_dyn_arr_push(arr, item);
@@ -6913,30 +6913,30 @@ bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out
    * an implicit upgrade to https. Hence `secure` as a parameter. */
   const char *want = secure ? "https" : "http";
   const size_t wantlen = secure ? 5 : 4;
-  if (!(u->scheme->len == wantlen && memcmp(u->scheme->data, want, wantlen) == 0)) {
+  if (!(scr_str_flat_view(u->scheme)->len == wantlen && memcmp(scr_str_flat_view(u->scheme)->data, want, wantlen) == 0)) {
     char msg[128];
     int n = snprintf(msg, sizeof msg, "Protocol \"%.*s:\" not supported. Expected \"%s:\"",
-                     (int)(u->scheme->len < 32 ? u->scheme->len : 32), u->scheme->data, want);
+                     (int)(scr_str_flat_view(u->scheme)->len < 32 ? scr_str_flat_view(u->scheme)->len : 32), scr_str_flat_view(u->scheme)->data, want);
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_PROTOCOL");
     scr_url_release(u);
     return false;
   }
   double port = secure ? 443 : 80;
-  if (u->port->len > 0) {
+  if (scr_str_flat_view(u->port)->len > 0) {
     port = 0;
-    for (size_t i = 0; i < u->port->len; i++) port = port * 10 + (u->port->data[i] - '0');
+    for (size_t i = 0; i < scr_str_flat_view(u->port)->len; i++) port = port * 10 + (scr_str_flat_view(u->port)->data[i] - '0');
   }
   /* IPv6 authority arrives bracketed ("[::1]") — the dial wants the bare
    * address, like Node's client strips them. */
-  if (u->host->len >= 2 && u->host->data[0] == '[' && u->host->data[u->host->len - 1] == ']') {
-    *host_out = scr_str_new(u->host->data + 1, u->host->len - 2);
+  if (scr_str_flat_view(u->host)->len >= 2 && scr_str_flat_view(u->host)->data[0] == '[' && scr_str_flat_view(u->host)->data[scr_str_flat_view(u->host)->len - 1] == ']') {
+    *host_out = scr_str_new(scr_str_flat_view(u->host)->data + 1, scr_str_flat_view(u->host)->len - 2);
   } else {
     *host_out = scr_str_retain(u->host);
   }
-  if (u->query->len > 0) {
+  if (scr_str_flat_view(u->query)->len > 0) {
     *path_out = scr_str_concat(u->path, u->query);
   } else {
-    *path_out = u->path->len > 0 ? scr_str_retain(u->path) : scr_str_new("/", 1);
+    *path_out = scr_str_flat_view(u->path)->len > 0 ? scr_str_retain(u->path) : scr_str_new("/", 1);
   }
   *port_out = port;
   scr_url_release(u);

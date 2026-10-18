@@ -80,22 +80,22 @@ ScrSym *scr_sym_well_known(ScrStr *name) {
   scr_str_release(description);
   symbol->reg_next = g_sym_well_known;
   g_sym_well_known = scr_sym_retain(symbol);
-  if (name->len == 8 && !memcmp(name->data, "iterator", 8)) {
+  if (scr_str_flat_view(name)->len == 8 && !memcmp(scr_str_flat_view(name)->data, "iterator", 8)) {
     ScrDyn *key = scr_dyn_new_symbol(symbol);
     scr_dyn_install_iterator_symbol(key);
     scr_dyn_release(key);
   }
-  if (name->len == 13 && !memcmp(name->data, "asyncIterator", 13)) {
+  if (scr_str_flat_view(name)->len == 13 && !memcmp(scr_str_flat_view(name)->data, "asyncIterator", 13)) {
     ScrDyn *key = scr_dyn_new_symbol(symbol);
     scr_dyn_install_async_iterator_symbol(key);
     scr_dyn_release(key);
   }
-  if (name->len == 12 && !memcmp(name->data, "asyncDispose", 12)) {
+  if (scr_str_flat_view(name)->len == 12 && !memcmp(scr_str_flat_view(name)->data, "asyncDispose", 12)) {
     ScrDyn *key = scr_dyn_new_symbol(symbol);
     scr_dyn_install_async_dispose_symbol(key);
     scr_dyn_release(key);
   }
-  if (name->len == 11 && !memcmp(name->data, "toPrimitive", 11)) {
+  if (scr_str_flat_view(name)->len == 11 && !memcmp(scr_str_flat_view(name)->data, "toPrimitive", 11)) {
     ScrDyn *key = scr_dyn_new_symbol(symbol);
     scr_dyn_install_to_primitive_symbol(key);
     scr_dyn_release(key);
@@ -140,14 +140,14 @@ ScrStr *scr_sym_to_string(ScrSym *s) {
   /* "Symbol(desc)" — Symbol.prototype.toString: an absent description
    * prints as the empty parenthesis pair ("Symbol()"), exactly Node
    * (Symbol() and Symbol(undefined) alike). */
-  size_t dlen = s->desc ? s->desc->len : 0;
+  size_t dlen = s->desc ? scr_str_flat_view(s->desc)->len : 0;
   size_t len = 7 + dlen + 1; /* "Symbol(" + desc + ")" */
   ScrStr *out = scr_str_alloc_raw(len, len);
-  memcpy(out->data, "Symbol(", 7);
-  if (dlen > 0) memcpy(out->data + 7, s->desc->data, dlen);
-  out->data[7 + dlen] = ')';
-  out->data[len] = '\0';
-  out->len = len;
+  memcpy(scr_str_flat_view(out)->data, "Symbol(", 7);
+  if (dlen > 0) memcpy(scr_str_flat_view(out)->data + 7, scr_str_flat_view(s->desc)->data, dlen);
+  scr_str_flat_view(out)->data[7 + dlen] = ')';
+  scr_str_flat_view(out)->data[len] = '\0';
+  scr_str_flat_view(out)->len = len;
   return out;
 }
 
@@ -170,12 +170,12 @@ void scr_assert_eq_sym(ScrSym *a, ScrSym *b, bool negated, bool deep,
   scr_assert_record(scr_dyn_new_symbol(a), scr_dyn_new_symbol(b), scr_assert_eq_operator(negated, deep));
   ScrStr *ia = scr_sym_to_string(a);
   if (negated) {
-    scr_assert_neq_fail(ia->data, ia->len, deep, msg, has_msg);
+    scr_assert_neq_fail(scr_str_flat_view(ia)->data, scr_str_flat_view(ia)->len, deep, msg, has_msg);
     scr_str_release(ia);
     return;
   }
   ScrStr *ib = scr_sym_to_string(b);
-  scr_assert_eq_fail(ia->data, ia->len, ib->data, ib->len, 0, false, true, deep,
+  scr_assert_eq_fail(scr_str_flat_view(ia)->data, scr_str_flat_view(ia)->len, scr_str_flat_view(ib)->data, scr_str_flat_view(ib)->len, 0, false, true, deep,
                      msg, has_msg);
   scr_str_release(ia);
   scr_str_release(ib);
@@ -374,7 +374,7 @@ static ScrDyn *scr_using_key(const char *name, size_t len) {
 
 static bool scr_using_typeof_is(const ScrDyn *value, const char *name, size_t len) {
   ScrStr *type = scr_dyn_typeof(value);
-  bool match = type->len == len && !memcmp(type->data, name, len);
+  bool match = scr_str_flat_view(type)->len == len && !memcmp(scr_str_flat_view(type)->data, name, len);
   scr_str_release(type);
   return match;
 }
@@ -562,13 +562,13 @@ static void scr_ds_put_value(ScrJsonBuf *b, const ScrDyn *value) {
   case SCR_DYN_STR:
   case SCR_DYN_BIGINT: {
     ScrStr *text = scr_dyn_to_string(value, NULL);
-    if (text) scr_jb_write(b, text->data, text->len);
+    if (text) scr_jb_write(b, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
     scr_str_release(text);
     return;
   }
   case SCR_DYN_SYMBOL: {
     ScrStr *text = value->v.symbol.render(value->v.symbol.value);
-    scr_jb_write(b, text->data, text->len);
+    scr_jb_write(b, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
     scr_str_release(text);
     return;
   }

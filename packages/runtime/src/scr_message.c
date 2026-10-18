@@ -245,8 +245,8 @@ static ScrDyn *scr_message_uncaught_keys(const ScrDyn *view) {
   }
   for (size_t i = 0; i < own->v.arr.len; i++) {
     const ScrStr *key = own->v.arr.items[i]->v.str;
-    if ((key->len == 4 && !memcmp(key->data, "name", 4)) || (key->len == 7 && !memcmp(key->data, "message", 7)) ||
-        (key->len && key->data[0] == '%'))
+    if ((scr_str_flat_view(key)->len == 4 && !memcmp(scr_str_flat_view(key)->data, "name", 4)) || (scr_str_flat_view(key)->len == 7 && !memcmp(scr_str_flat_view(key)->data, "message", 7)) ||
+        (scr_str_flat_view(key)->len && scr_str_flat_view(key)->data[0] == '%'))
       continue;
     scr_dyn_arr_push(keys, scr_dyn_retain(own->v.arr.items[i]));
   }
@@ -335,7 +335,7 @@ static size_t scr_message_value(ScrMessageEncoder *encoder, const ScrDyn *input)
       SCR_ERR_ERROR, SCR_ERR_TYPE, SCR_ERR_RANGE, SCR_ERR_SYNTAX, SCR_ERR_REFERENCE, SCR_ERR_EVAL, SCR_ERR_URI,
     };
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
-      if (error->name->len == strlen(names[i]) && !memcmp(error->name->data, names[i], error->name->len))
+      if (scr_str_flat_view(error->name)->len == strlen(names[i]) && !memcmp(scr_str_flat_view(error->name)->data, names[i], scr_str_flat_view(error->name)->len))
         node->number = kinds[i];
     ScrDyn *keys = scr_dyn_new_arr();
     static const char *const fields[] = {"message", "stack", "cause"};
@@ -357,15 +357,15 @@ static size_t scr_message_value(ScrMessageEncoder *encoder, const ScrDyn *input)
   case SCR_DYN_NUM: node->kind = SCR_MESSAGE_NUMBER; node->number = value->v.num; break;
   case SCR_DYN_STR:
     node->kind = SCR_MESSAGE_STRING;
-    node->length = value->v.str->len;
-    node->data = scr_message_copy(value->v.str->data, node->length);
+    node->length = scr_str_flat_view(value->v.str)->len;
+    node->data = scr_message_copy(scr_str_flat_view(value->v.str)->data, node->length);
     break;
   case SCR_DYN_BIGINT: {
     ScrStr *text = scr_bigint_to_string(value->v.bigint, 10);
     if (!text) return SIZE_MAX;
     node->kind = SCR_MESSAGE_BIGINT;
-    node->length = text->len;
-    node->data = scr_message_copy(text->data, text->len);
+    node->length = scr_str_flat_view(text)->len;
+    node->data = scr_message_copy(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
     scr_str_release(text);
     break;
   }
@@ -440,7 +440,7 @@ static void scr_message_property(ScrMessageEncoder *encoder, size_t id,
     node->capacity = capacity;
   }
   node->properties[node->count++] = (ScrMessageProperty){
-    (char *)scr_message_copy(key->data, key->len), key->len, value, hidden,
+    (char *)scr_message_copy(scr_str_flat_view(key)->data, scr_str_flat_view(key)->len), scr_str_flat_view(key)->len, value, hidden,
   };
 }
 
@@ -550,6 +550,19 @@ static bool scr_publish_collect(ScrPublish *p, ScrDyn *root) {
 
 static int scr_publish_enabled = -1;
 
+static void scr_message_publish_string(ScrStr *text, void *context) {
+  (void)context;
+  if (text->rc == SIZE_MAX) return;
+  scr_str_prepare_publish(text);
+  scr_str_hash_prime(text);
+  text->rc = SIZE_MAX;
+#ifdef SCR_RC_AUDIT
+  scr_str_live_forget();
+#endif
+  scr_lsan_immortal(text);
+  scr_str_visit_owners(text, scr_message_publish_string, NULL);
+}
+
 static ScrMessage *scr_message_try_publish(const ScrDyn *value) {
   if (scr_publish_enabled < 0) {
     const char *env = getenv("SCRIPTC_PUBLISH");
@@ -563,12 +576,7 @@ static ScrMessage *scr_message_try_publish(const ScrDyn *value) {
       ScrDyn *d = p.nodes[i];
       if ((uintptr_t)d & 1) {
         ScrStr *text = (ScrStr *)((uintptr_t)d & ~(uintptr_t)1);
-        scr_str_hash_prime(text);
-        text->rc = SIZE_MAX;
-#ifdef SCR_RC_AUDIT
-        scr_str_live_forget();
-#endif
-        scr_lsan_immortal(text);
+        scr_message_publish_string(text, NULL);
       } else if (d->rc != SIZE_MAX) {
         scr_cyc_on_dead(d); /* leave the candidate and tenured buffers */
         d->rc = SIZE_MAX;
@@ -654,7 +662,7 @@ static ScrMessage *scr_message_encode_run(ScrMessageEncoder encoder, const ScrDy
        * and symbols, and serializes its cause the same way. */
       if (child->kind == SCR_DYN_FUNC || child->kind == SCR_DYN_SYMBOL) { scr_dyn_release(child); continue; }
       hidden = !scr_dyn_has_own(visit->view, key->v.str) || !scr_dyn_property_is_enumerable(visit->view, key->v.str);
-      encoder.uncaught = key->v.str->len == 5 && !memcmp(key->v.str->data, "cause", 5);
+      encoder.uncaught = scr_str_flat_view(key->v.str)->len == 5 && !memcmp(scr_str_flat_view(key->v.str)->data, "cause", 5);
     }
     size_t next = scr_message_value(&encoder, child);
     scr_dyn_release(child);

@@ -1062,11 +1062,11 @@ static size_t bi_space_suffix(const char *s, size_t n) {
 static ScrBigInt *bi_parse_fail(const ScrStr *s) {
   static const char pre[] = "Cannot convert ";
   static const char post[] = " to a BigInt";
-  size_t n = sizeof pre - 1 + s->len + sizeof post - 1;
+  size_t n = sizeof pre - 1 + scr_str_flat_view(s)->len + sizeof post - 1;
   char *msg = bi_malloc(n);
   memcpy(msg, pre, sizeof pre - 1);
-  memcpy(msg + sizeof pre - 1, s->data, s->len);
-  memcpy(msg + sizeof pre - 1 + s->len, post, sizeof post - 1);
+  memcpy(msg + sizeof pre - 1, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  memcpy(msg + sizeof pre - 1 + scr_str_flat_view(s)->len, post, sizeof post - 1);
   scr_throw_error_msg(SCR_ERR_SYNTAX, msg, n);
   free(msg);
   return NULL;
@@ -1126,21 +1126,21 @@ static ScrBigInt *bi_parse_decimal(const char *p, size_t count, int sign) {
 }
 
 static ScrBigInt *bi_parse_string(ScrStr *s, bool report_error) {
-  size_t lo = 0, hi = s->len;
+  size_t lo = 0, hi = scr_str_flat_view(s)->len;
   size_t width;
-  while (lo < hi && (width = bi_space_prefix(s->data + lo, hi - lo)) != 0) lo += width;
-  while (hi > lo && (width = bi_space_suffix(s->data + lo, hi - lo)) != 0) hi -= width;
+  while (lo < hi && (width = bi_space_prefix(scr_str_flat_view(s)->data + lo, hi - lo)) != 0) lo += width;
+  while (hi > lo && (width = bi_space_suffix(scr_str_flat_view(s)->data + lo, hi - lo)) != 0) hi -= width;
   if (lo == hi) return bi_zero();
   int sign = 1;
   bool signed_input = false;
-  if (s->data[lo] == '+' || s->data[lo] == '-') {
+  if (scr_str_flat_view(s)->data[lo] == '+' || scr_str_flat_view(s)->data[lo] == '-') {
     signed_input = true;
-    if (s->data[lo++] == '-') sign = -1;
+    if (scr_str_flat_view(s)->data[lo++] == '-') sign = -1;
     if (lo == hi) return bi_parse_invalid(s, report_error);
   }
   unsigned base = 10;
-  if (hi - lo >= 2 && s->data[lo] == '0') {
-    char p = s->data[lo + 1];
+  if (hi - lo >= 2 && scr_str_flat_view(s)->data[lo] == '0') {
+    char p = scr_str_flat_view(s)->data[lo + 1];
     if (p == 'x' || p == 'X') base = 16;
     else if (p == 'o' || p == 'O') base = 8;
     else if (p == 'b' || p == 'B') base = 2;
@@ -1151,17 +1151,17 @@ static ScrBigInt *bi_parse_string(ScrStr *s, bool report_error) {
     }
   }
   for (size_t i = lo; i < hi; i++) {
-    int d = bi_digit((unsigned char)s->data[i]);
+    int d = bi_digit((unsigned char)scr_str_flat_view(s)->data[i]);
     if (d < 0 || (unsigned)d >= base) return bi_parse_invalid(s, report_error);
   }
-  while (lo < hi && s->data[lo] == '0') lo++; /* leading zeros carry nothing */
+  while (lo < hi && scr_str_flat_view(s)->data[lo] == '0') lo++; /* leading zeros carry nothing */
   if (lo == hi) return bi_zero();
   size_t count = hi - lo;
   if (!scr_bigint_digits_fit(count, base)) {
     bi_max_size_exceeded();
     return NULL;
   }
-  const char *p = s->data + lo;
+  const char *p = scr_str_flat_view(s)->data + lo;
   ScrBigInt *v = base == 10 ? bi_parse_decimal(p, count, sign)
                             : bi_parse_pow2(p, count, base == 16 ? 4 : base == 8 ? 3 : 1, sign);
   if (v->len > BI_MAX_LIMBS) {
@@ -1431,10 +1431,10 @@ ScrStr *scr_bigint_to_string(ScrBigInt *v, double radix_value) {
 ScrStr *scr_bigint_inspect(ScrBigInt *v) {
   ScrStr *digits = scr_bigint_to_string(v, 10);
   if (!digits) return NULL;
-  char *buf = bi_malloc(digits->len + 1);
-  memcpy(buf, digits->data, digits->len);
-  buf[digits->len] = 'n';
-  ScrStr *out = scr_str_new(buf, digits->len + 1);
+  char *buf = bi_malloc(scr_str_flat_view(digits)->len + 1);
+  memcpy(buf, scr_str_flat_view(digits)->data, scr_str_flat_view(digits)->len);
+  buf[scr_str_flat_view(digits)->len] = 'n';
+  ScrStr *out = scr_str_new(buf, scr_str_flat_view(digits)->len + 1);
   free(buf);
   scr_str_release(digits);
   return out;
@@ -1626,20 +1626,20 @@ static ScrBigInt *bi_from_u64_signed(uint64_t value, bool sign) {
 
 static void bi_grouped_decimal(const ScrBigInt *value, char **out, size_t *out_len) {
   ScrStr *plain = scr_bigint_to_string((ScrBigInt *)value, 10);
-  size_t start = plain->len && plain->data[0] == '-' ? 1 : 0;
-  size_t digits = plain->len - start;
+  size_t start = scr_str_flat_view(plain)->len && scr_str_flat_view(plain)->data[0] == '-' ? 1 : 0;
+  size_t digits = scr_str_flat_view(plain)->len - start;
   size_t groups = digits > 3 ? (digits - 1) / 3 : 0;
-  char *buf = bi_malloc(plain->len + groups + 2);
+  char *buf = bi_malloc(scr_str_flat_view(plain)->len + groups + 2);
   size_t src = 0, dst = 0;
-  if (start) buf[dst++] = plain->data[src++];
+  if (start) buf[dst++] = scr_str_flat_view(plain)->data[src++];
   size_t first = digits % 3;
   if (!first) first = 3;
-  memcpy(buf + dst, plain->data + src, first);
+  memcpy(buf + dst, scr_str_flat_view(plain)->data + src, first);
   src += first;
   dst += first;
-  while (src < plain->len) {
+  while (src < scr_str_flat_view(plain)->len) {
     buf[dst++] = '_';
-    memcpy(buf + dst, plain->data + src, 3);
+    memcpy(buf + dst, scr_str_flat_view(plain)->data + src, 3);
     src += 3;
     dst += 3;
   }

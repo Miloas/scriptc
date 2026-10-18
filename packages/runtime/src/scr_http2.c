@@ -1705,7 +1705,7 @@ static bool scr_h2_on_err(void *ctx, ScrStr *msg) {
   if (s->err_ls.n == 0 && (s->srv == NULL || s->srv->session_error_ls.n == 0)) {
     return false; /* the socket's error story applies */
   }
-  scr_h2_session_fail(s, (const char *)msg->data);
+  scr_h2_session_fail(s, (const char *)scr_str_flat_view(msg)->data);
   return true;
 }
 
@@ -1818,8 +1818,8 @@ static void scr_h2_encode_regulars(ScrH2Buf *b, ScrArr *pairs) {
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *name = scr_arr_get_ref(pairs, (double)i);
     ScrStr *value = scr_arr_get_ref(pairs, (double)(i + 1));
-    if (name->len > 0 && name->data[0] != ':') {
-      scr_h2_encode_header_lower(b, name->data, name->len, value->data, value->len);
+    if (scr_str_flat_view(name)->len > 0 && scr_str_flat_view(name)->data[0] != ':') {
+      scr_h2_encode_header_lower(b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
     }
     scr_str_release(name);
     scr_str_release(value);
@@ -1847,7 +1847,7 @@ static ScrStr *scr_h2_pairs_pseudo(ScrArr *pairs, const char *name) {
   size_t n = (size_t)scr_arr_len(pairs);
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *nm = scr_arr_get_ref(pairs, (double)i);
-    bool hit = nm->len == want && memcmp(nm->data, name, want) == 0;
+    bool hit = scr_str_flat_view(nm)->len == want && memcmp(scr_str_flat_view(nm)->data, name, want) == 0;
     scr_str_release(nm);
     if (hit) return scr_arr_get_ref(pairs, (double)(i + 1));
   }
@@ -1863,7 +1863,7 @@ void scr_http2_stream_respond(ScrH2Stream *st, ScrArr *pairs /*borrowed, nullabl
   st->respond_sent = true;
   ScrH2Buf block = {0};
   ScrStr *status = scr_h2_pairs_pseudo(pairs, ":status");
-  scr_h2_hpack_encode(&block, ":status", 7, status ? status->data : "200", status ? status->len : 3);
+  scr_h2_hpack_encode(&block, ":status", 7, status ? scr_str_flat_view(status)->data : "200", status ? scr_str_flat_view(status)->len : 3);
   if (status) scr_str_release(status);
   scr_h2_encode_regulars(&block, pairs);
   /* Node's auto date header (last unless the caller provided one) */
@@ -1886,7 +1886,7 @@ void scr_http2_stream_respond(ScrH2Stream *st, ScrArr *pairs /*borrowed, nullabl
 void scr_http2_stream_write_str(ScrH2Stream *st, ScrStr *data /*borrowed*/) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_h2_stream_send(st, bytes, data->len);
+  scr_h2_stream_send(st, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -1905,7 +1905,7 @@ void scr_http2_stream_end_str(ScrH2Stream *st, ScrStr *data /*borrowed*/) {
   if (st->destroyed || st->want_end || scr_h2_stream_local_closed(st)) return;
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_h2_buf_put(&st->wbuf, bytes, data->len);
+  scr_h2_buf_put(&st->wbuf, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
   st->want_end = true;
   scr_h2_stream_flush(st);
@@ -1945,15 +1945,15 @@ void scr_http2_stream_destroy(ScrH2Stream *st) {
 void scr_http2_stream_set_encoding(ScrH2Stream *st, ScrStr *enc /*borrowed*/) {
   /* ascii/latin1 deliver through the same string window as utf8 (the
    * suite's bodies are ASCII; SEMANTICS.md notes the residue) */
-  if ((enc->len == 4 && memcmp(enc->data, "utf8", 4) == 0) ||
-      (enc->len == 5 && memcmp(enc->data, "utf-8", 5) == 0) ||
-      (enc->len == 5 && memcmp(enc->data, "ascii", 5) == 0) ||
-      (enc->len == 6 && memcmp(enc->data, "latin1", 6) == 0)) {
+  if ((scr_str_flat_view(enc)->len == 4 && memcmp(scr_str_flat_view(enc)->data, "utf8", 4) == 0) ||
+      (scr_str_flat_view(enc)->len == 5 && memcmp(scr_str_flat_view(enc)->data, "utf-8", 5) == 0) ||
+      (scr_str_flat_view(enc)->len == 5 && memcmp(scr_str_flat_view(enc)->data, "ascii", 5) == 0) ||
+      (scr_str_flat_view(enc)->len == 6 && memcmp(scr_str_flat_view(enc)->data, "latin1", 6) == 0)) {
     st->enc_utf8 = true;
     return;
   }
   char msg[96];
-  int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s", (int)(enc->len > 40 ? 40 : enc->len), enc->data);
+  int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s", (int)(scr_str_flat_view(enc)->len > 40 ? 40 : scr_str_flat_view(enc)->len), scr_str_flat_view(enc)->data);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_UNKNOWN_ENCODING");
 }
 
@@ -2045,11 +2045,11 @@ static ScrArr *scr_h2_headers_pairs(const ScrH2Headers *h, bool skip_status, dou
   ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, h->n * 2);
   for (size_t i = 0; i < h->n; i++) {
     ScrStr *name = h->names[i];
-    if (skip_status && name->len == 7 && memcmp(name->data, ":status", 7) == 0) {
+    if (skip_status && scr_str_flat_view(name)->len == 7 && memcmp(scr_str_flat_view(name)->data, ":status", 7) == 0) {
       if (status_out) {
         double v = 0;
-        for (size_t k = 0; k < h->values[i]->len; k++) {
-          char c = h->values[i]->data[k];
+        for (size_t k = 0; k < scr_str_flat_view(h->values[i])->len; k++) {
+          char c = scr_str_flat_view(h->values[i])->data[k];
           if (c < '0' || c > '9') break;
           v = v * 10 + (c - '0');
         }
@@ -2100,8 +2100,8 @@ static void scr_h2_dispatch_headers(ScrH2Session *s, int32_t stream_id, uint8_t 
     for (size_t i = 0; i < h->n; i++) {
       ScrStr *name = h->names[i];
       ScrStr *value = h->values[i];
-      if (name->len == 7 && memcmp(name->data, ":method", 7) == 0 &&
-          value->len == 7 && memcmp(value->data, "CONNECT", 7) == 0) {
+      if (scr_str_flat_view(name)->len == 7 && memcmp(scr_str_flat_view(name)->data, ":method", 7) == 0 &&
+          scr_str_flat_view(value)->len == 7 && memcmp(scr_str_flat_view(value)->data, "CONNECT", 7) == 0) {
         connect_request = true;
       }
     }
@@ -2182,10 +2182,10 @@ static void scr_h2_compat_respond(void *p, double status, ScrStr *const *names,
     bool skip = false;
     for (size_t k = 0; conn_specific[k] != NULL && !skip; k++) {
       size_t cl = strlen(conn_specific[k]);
-      if (name->len == cl) {
+      if (scr_str_flat_view(name)->len == cl) {
         bool eq = true;
         for (size_t j = 0; j < cl && eq; j++) {
-          char c = name->data[j];
+          char c = scr_str_flat_view(name)->data[j];
           if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
           eq = c == conn_specific[k][j];
         }
@@ -2193,16 +2193,16 @@ static void scr_h2_compat_respond(void *p, double status, ScrStr *const *names,
       }
     }
     if (skip) continue;
-    if (name->len == 4) {
+    if (scr_str_flat_view(name)->len == 4) {
       bool is_date = true;
       for (size_t j = 0; j < 4 && is_date; j++) {
-        char c = name->data[j];
+        char c = scr_str_flat_view(name)->data[j];
         if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
         is_date = c == "date"[j];
       }
       if (is_date) have_date = true;
     }
-    scr_h2_encode_header_lower(&block, name->data, name->len, values[i]->data, values[i]->len);
+    scr_h2_encode_header_lower(&block, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, scr_str_flat_view(values[i])->data, scr_str_flat_view(values[i])->len);
   }
   if (add_date && !have_date) scr_h2_encode_date(&block);
   scr_h2_send_headers(s, st->id, &block, false);
@@ -2291,9 +2291,9 @@ static void scr_h2_compat_dispatch(ScrH2Session *s, ScrH2Stream *st, const ScrH2
   for (size_t i = 0; i < h->n; i++) {
     ScrStr *name = h->names[i];
     ScrStr *value = h->values[i];
-    if (name->len == 7 && memcmp(name->data, ":method", 7) == 0) {
+    if (scr_str_flat_view(name)->len == 7 && memcmp(scr_str_flat_view(name)->data, ":method", 7) == 0) {
       scr_http_h2_req_line(req, value, NULL);
-    } else if (name->len == 5 && memcmp(name->data, ":path", 5) == 0) {
+    } else if (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, ":path", 5) == 0) {
       scr_http_h2_req_line(req, NULL, value);
     }
     /* EVERY pair — pseudo-headers included — lands in req.headers
@@ -2534,12 +2534,12 @@ static void scr_h2_on_established(void *ctx) {
 ScrH2Session *scr_http2_connect(ScrStr *url /*borrowed*/, bool reject_unauthorized,
                                  const char *ca /*borrowed, len 0 = none*/, size_t ca_len,
                                  ScrClosure *cb /*moves, nullable*/, ScrH2ConnectFn fn) {
-  const char *p = url->data;
+  const char *p = scr_str_flat_view(url)->data;
   const char *sep = strstr(p, "://");
-  if (sep == NULL || url->len == 0) {
+  if (sep == NULL || scr_str_flat_view(url)->len == 0) {
     if (cb) scr_closure_release(cb);
     char msg[128];
-    int n = snprintf(msg, sizeof msg, "Invalid URL: %.*s", (int)(url->len > 80 ? 80 : url->len), p);
+    int n = snprintf(msg, sizeof msg, "Invalid URL: %.*s", (int)(scr_str_flat_view(url)->len > 80 ? 80 : scr_str_flat_view(url)->len), p);
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_URL");
     return NULL;
   }
@@ -2554,7 +2554,7 @@ ScrH2Session *scr_http2_connect(ScrStr *url /*borrowed*/, bool reject_unauthoriz
     return NULL;
   }
   const char *host = sep + 3;
-  const char *end = p + url->len;
+  const char *end = p + scr_str_flat_view(url)->len;
   const char *host_end = host;
   while (host_end < end && *host_end != ':' && *host_end != '/') host_end++;
   double default_port = secure ? 443 : 80;
@@ -2620,26 +2620,26 @@ ScrH2Stream *scr_http2_session_request(ScrH2Session *s, ScrArr *pairs /*borrowed
   ScrStr *scheme = scr_h2_pairs_pseudo(pairs, ":scheme");
   ScrStr *authority = scr_h2_pairs_pseudo(pairs, ":authority");
   ScrH2Buf block = {0};
-  scr_h2_hpack_encode(&block, ":method", 7, method ? method->data : "GET", method ? method->len : 3);
+  scr_h2_hpack_encode(&block, ":method", 7, method ? scr_str_flat_view(method)->data : "GET", method ? scr_str_flat_view(method)->len : 3);
   if (authority) {
-    scr_h2_hpack_encode(&block, ":authority", 10, authority->data, authority->len);
+    scr_h2_hpack_encode(&block, ":authority", 10, scr_str_flat_view(authority)->data, scr_str_flat_view(authority)->len);
   } else {
     scr_h2_hpack_encode(&block, ":authority", 10, s->authority ? s->authority : "", s->authority_len);
   }
   /* the default :scheme follows the transport — https over TLS sessions
    * (Node derives it from the connect authority the same way) */
   const char *dscheme = s->sock != NULL && scr_net_sock_encrypted(s->sock) ? "https" : "http";
-  scr_h2_hpack_encode(&block, ":scheme", 7, scheme ? scheme->data : dscheme,
-                      scheme ? scheme->len : strlen(dscheme));
-  scr_h2_hpack_encode(&block, ":path", 5, path ? path->data : "/", path ? path->len : 1);
+  scr_h2_hpack_encode(&block, ":scheme", 7, scheme ? scr_str_flat_view(scheme)->data : dscheme,
+                      scheme ? scr_str_flat_view(scheme)->len : strlen(dscheme));
+  scr_h2_hpack_encode(&block, ":path", 5, path ? scr_str_flat_view(path)->data : "/", path ? scr_str_flat_view(path)->len : 1);
   scr_h2_encode_regulars(&block, pairs);
   bool end;
   if (end_stream < 0) {
     /* Node's payload-meaningless default: GET/HEAD/DELETE end at HEADERS */
     end = method == NULL ||
-          (method->len == 3 && memcmp(method->data, "GET", 3) == 0) ||
-          (method->len == 4 && memcmp(method->data, "HEAD", 4) == 0) ||
-          (method->len == 6 && memcmp(method->data, "DELETE", 6) == 0);
+          (scr_str_flat_view(method)->len == 3 && memcmp(scr_str_flat_view(method)->data, "GET", 3) == 0) ||
+          (scr_str_flat_view(method)->len == 4 && memcmp(scr_str_flat_view(method)->data, "HEAD", 4) == 0) ||
+          (scr_str_flat_view(method)->len == 6 && memcmp(scr_str_flat_view(method)->data, "DELETE", 6) == 0);
   } else {
     end = end_stream > 0;
   }
@@ -2922,8 +2922,8 @@ static ScrDyn *scr_h2_pairs_to_dom(ScrArr *pairs /*borrowed*/, double status) {
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *name = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
     ScrStr *value = (ScrStr *)scr_arr_get_ref(pairs, (double)(i + 1));
-    if (!scr_dyn_obj_get(obj, name->data, name->len)) {
-      scr_dyn_obj_set(obj, name->data, name->len, scr_dyn_new_str(value));
+    if (!scr_dyn_obj_get(obj, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len)) {
+      scr_dyn_obj_set(obj, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, scr_dyn_new_str(value));
     }
     scr_str_release(name);
     scr_str_release(value);
@@ -3087,7 +3087,7 @@ static ScrDyn *scr_h2_dynh_stream_invoke(void *h, ScrDyn *self, const char *meth
     bool once = method[0] == 'o' && method[1] == 'n' && method[2] == 'c';
     if (argc < 2 || args[0]->kind != SCR_DYN_STR) { scr_dyn_check_listener(argc > 1 ? args[1] : scr_dyn_undefined(), "listener"); return NULL; }
     scr_dyn_check_listener(args[1], "listener");
-    const char *ev = args[0]->v.str->data;
+    const char *ev = scr_str_flat_view(args[0]->v.str)->data;
     if (strcmp(ev, "data") == 0) {
       scr_http2_stream_on_data(st, scr_dyn_listener_closure_data(args[1]), (ScrNetDataFn)&scr_dyn_listener_fire_data, once);
     } else if (strcmp(ev, "end") == 0) {
@@ -3163,7 +3163,7 @@ static ScrDyn *scr_h2_dynh_session_invoke(void *h, ScrDyn *self, const char *met
     bool once = method[0] == 'o' && method[1] == 'n' && method[2] == 'c';
     if (argc < 2 || args[0]->kind != SCR_DYN_STR) { scr_dyn_check_listener(argc > 1 ? args[1] : scr_dyn_undefined(), "listener"); return NULL; }
     scr_dyn_check_listener(args[1], "listener");
-    const char *ev = args[0]->v.str->data;
+    const char *ev = scr_str_flat_view(args[0]->v.str)->data;
     if (strcmp(ev, "close") == 0) {
       scr_http2_session_on_close(s, scr_dyn_listener_closure0(args[1]), once);
     } else if (strcmp(ev, "error") == 0) {

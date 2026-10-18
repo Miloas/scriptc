@@ -188,7 +188,7 @@ static void sc_invalid_property(const char *name, const ScrDyn *value) {
   scr_jb_puts(&b, "' is invalid. Received ");
   scr_jb_puts(&b, text);
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(message);
 }
 
@@ -206,7 +206,7 @@ static void sc_not_one_of(const char *name, const char *allowed, const ScrDyn *v
   scr_jb_puts(&b, ". Received ");
   scr_jb_puts(&b, text);
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(message);
 }
 
@@ -254,7 +254,7 @@ static void sc_unknown_encoding(const ScrDyn *encoding) {
   scr_jb_put_str(&b, text);
   scr_str_release(text);
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_UNKNOWN_ENCODING");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_UNKNOWN_ENCODING");
   scr_str_release(message);
 }
 
@@ -273,7 +273,7 @@ static bool sc_ascii_eq_ci(const char *a, size_t a_len, const char *b) {
 
 static bool sc_str_is(const ScrStr *text, const char *literal) {
   size_t len = strlen(literal);
-  return text->len == len && memcmp(text->data, literal, len) == 0;
+  return scr_str_flat_view(text)->len == len && memcmp(scr_str_flat_view(text)->data, literal, len) == 0;
 }
 
 /* Node's normalizeEncoding: the canonical name, or NULL. */
@@ -285,7 +285,7 @@ static const char *sc_normalize_encoding(const ScrStr *name) {
     {"utf-16le", "utf16le"}, {"ucs2", "utf16le"},    {"ucs-2", "utf16le"},
   };
   for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
-    if (sc_ascii_eq_ci(name->data, name->len, map[i].from)) return map[i].to;
+    if (sc_ascii_eq_ci(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, map[i].from)) return map[i].to;
   return NULL;
 }
 
@@ -303,8 +303,8 @@ static ScrBytes *sc_bytes_of(const ScrDyn *value) {
  * ERR_UNKNOWN_ENCODING. "buffer" reads as utf8. +1 or NULL. */
 static ScrBytes *sc_string_bytes(const ScrStr *text, const ScrDyn *encoding) {
   const char *name = "utf8";
-  if (encoding && encoding->kind == SCR_DYN_STR && encoding->v.str->len > 0 &&
-      !sc_ascii_eq_ci(encoding->v.str->data, encoding->v.str->len, "buffer")) {
+  if (encoding && encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len > 0 &&
+      !sc_ascii_eq_ci(scr_str_flat_view(encoding->v.str)->data, scr_str_flat_view(encoding->v.str)->len, "buffer")) {
     name = sc_normalize_encoding(encoding->v.str);
     if (!name) {
       sc_unknown_encoding(encoding);
@@ -406,13 +406,13 @@ static double sc_uint_option(const ScrDyn *options, const char *key) {
 
 static const ScCipherSpec *sc_lookup(const ScrStr *name) {
   for (size_t i = 0; i < sizeof sc_specs / sizeof sc_specs[0]; i++)
-    if (sc_ascii_eq_ci(name->data, name->len, sc_specs[i].name)) return &sc_specs[i];
+    if (sc_ascii_eq_ci(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, sc_specs[i].name)) return &sc_specs[i];
   return NULL;
 }
 
 static bool sc_known_name(const ScrStr *name) {
   for (size_t i = 0; i < sizeof sc_known / sizeof sc_known[0]; i++)
-    if (sc_ascii_eq_ci(name->data, name->len, sc_known[i])) return true;
+    if (sc_ascii_eq_ci(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, sc_known[i])) return true;
   return false;
 }
 
@@ -425,7 +425,7 @@ static void sc_unsupported_cipher(const ScrStr *name) {
                   "aes-256-cbc, aes-128-ctr, aes-192-ctr, aes-256-ctr, aes-128-gcm, aes-192-gcm, "
                   "aes-256-gcm and chacha20-poly1305");
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, message->data, message->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "SC2020");
   scr_str_release(message);
 }
 
@@ -510,7 +510,7 @@ static ScrDyn *sc_cipher_new(bool decrypt, ScrDyn *cipher, ScrDyn *key, ScrDyn *
     scr_jb_put_str(&b, cipher->v.str);
     scr_jb_puts(&b, cts_mode ? " does not support the ctsMode option" : " does not support the xtsStandard option");
     ScrStr *message = scr_jb_finish(&b);
-    scr_throw_error_msg_code(SCR_ERR_ERROR, message->data, message->len, "ERR_CRYPTO_UNSUPPORTED_OPERATION");
+    scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_CRYPTO_UNSUPPORTED_OPERATION");
     scr_str_release(message);
     goto done;
   }
@@ -783,7 +783,7 @@ static bool sc_decoder(ScCipher *c, const ScrDyn *encoding) {
     c->pending = 0;
     return true;
   }
-  if (name && strcmp(c->decoder->data, name) == 0) return true;
+  if (name && strcmp(scr_str_flat_view(c->decoder)->data, name) == 0) return true;
   if (!name) {
     sc_unknown_encoding(encoding);
     return false;
@@ -797,14 +797,14 @@ static bool sc_decoder(ScCipher *c, const ScrDyn *encoding) {
   scr_jb_puts(&b, "'. Received ");
   scr_jb_puts(&b, text);
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(message);
   return false;
 }
 
 static bool sc_wants_string(const ScrDyn *encoding) {
   if (!scr_dyn_truthy(encoding)) return false;
-  return !(encoding->kind == SCR_DYN_STR && encoding->v.str->len == 6 && memcmp(encoding->v.str->data, "buffer", 6) == 0);
+  return !(encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len == 6 && memcmp(scr_str_flat_view(encoding->v.str)->data, "buffer", 6) == 0);
 }
 
 /* The method result: the Buffer, or its StringDecoder text. Consumes out. */

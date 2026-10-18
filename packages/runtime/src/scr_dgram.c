@@ -338,7 +338,7 @@ static void scr_dgram_fire0(ScrDgramLs *l) {
 static void scr_dgram_fire_err(ScrDgramLs *l, ScrStr *msg) {
   if (l->n == 0) {
     fflush(stdout);
-    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", msg->data);
+    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", scr_str_flat_view(msg)->data);
     _Exit(1);
   }
   ScrDgramL *snap;
@@ -564,9 +564,9 @@ void scr_dgram_bind(ScrDgramSocket *s, double port, ScrStr *host, ScrClosure *cb
   }
   if (cb) scr_dgram_ls_add(&s->listening_ls, cb, NULL, true);
   struct sockaddr_in a4;
-  if (!scr_dgram_host4(host->data, (uint16_t)(int)port, &a4)) {
+  if (!scr_dgram_host4(scr_str_flat_view(host)->data, (uint16_t)(int)port, &a4)) {
     char msg[160];
-    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", host->data);
+    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", scr_str_flat_view(host)->data);
     scr_dgram_defer_err(s, msg);
     return;
   }
@@ -605,9 +605,9 @@ void scr_dgram_connect(ScrDgramSocket *s, double port, ScrStr *host, ScrClosure 
   }
   if (cb) scr_dgram_ls_add(&s->conn_ls, cb, NULL, true);
   struct sockaddr_in a4;
-  if (!scr_dgram_host4(host->data, (uint16_t)(int)port, &a4) || host->len == 0) {
+  if (!scr_dgram_host4(scr_str_flat_view(host)->data, (uint16_t)(int)port, &a4) || scr_str_flat_view(host)->len == 0) {
     char msg[160];
-    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", host->data);
+    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", scr_str_flat_view(host)->data);
     scr_dgram_defer_err(s, msg);
     return;
   }
@@ -641,9 +641,9 @@ static void scr_dgram_send_raw(ScrDgramSocket *s, const char *data, size_t len, 
     return;
   }
   struct sockaddr_in a4;
-  if (!scr_dgram_host4(host->data, (uint16_t)(int)port, &a4) || host->len == 0) {
+  if (!scr_dgram_host4(scr_str_flat_view(host)->data, (uint16_t)(int)port, &a4) || scr_str_flat_view(host)->len == 0) {
     char msg[160];
-    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", host->data);
+    snprintf(msg, sizeof msg, "getaddrinfo ENOTFOUND %s", scr_str_flat_view(host)->data);
     scr_dgram_defer_err(s, msg);
     return;
   }
@@ -669,7 +669,7 @@ static void scr_dgram_send_raw(ScrDgramSocket *s, const char *data, size_t len, 
 void scr_dgram_send_str(ScrDgramSocket *s, ScrStr *data, double port, ScrStr *host) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_dgram_send_raw(s, bytes, data->len, port, host);
+  scr_dgram_send_raw(s, bytes, scr_str_flat_view(data)->len, port, host);
   scr_str_utf8_end(owned);
 }
 
@@ -862,9 +862,9 @@ bool scr_dgram_set_multicast_loopback(ScrDgramSocket *s, bool flag) {
 /* A NUL-terminated copy of a borrowed string, NULL when it is too long
  * to be an address (the caller answers EINVAL). */
 static const char *scr_dgram_cstr(const ScrStr *v, char *buf, size_t cap) {
-  if (v->len >= cap || memchr(v->data, '\0', v->len) != NULL) return NULL;
-  memcpy(buf, v->data, v->len);
-  buf[v->len] = '\0';
+  if (scr_str_flat_view(v)->len >= cap || memchr(scr_str_flat_view(v)->data, '\0', scr_str_flat_view(v)->len) != NULL) return NULL;
+  memcpy(buf, scr_str_flat_view(v)->data, scr_str_flat_view(v)->len);
+  buf[scr_str_flat_view(v)->len] = '\0';
   return buf;
 }
 
@@ -915,7 +915,7 @@ void scr_dgram_set_multicast_interface(ScrDgramSocket *s, ScrStr *iface /*borrow
 static void scr_dgram_membership(ScrDgramSocket *s, ScrStr *group, ScrStr *iface, bool join) {
   const char *syscall = join ? "addMembership" : "dropMembership";
   if (scr_dgram_not_running(s)) return;
-  if (group->len == 0) {
+  if (scr_str_flat_view(group)->len == 0) {
     static const char msg[] = "The \"multicastAddress\" argument must be specified";
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_MISSING_ARGS");
     return;
@@ -1147,7 +1147,7 @@ static void scr_dgram_read(ScrDgramSocket *s) {
 
 void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLookupFn fn) {
   (void)family; /* the frontend pinned 4; AF_INET below IS that pin */
-  if (memchr(hostname->data, '\0', hostname->len) != NULL) {
+  if (memchr(scr_str_flat_view(hostname)->data, '\0', scr_str_flat_view(hostname)->len) != NULL) {
     /* validateStringWithoutNullBytes: a synchronous ERR_INVALID_ARG_VALUE
      * TypeError before any lookup runs; the callback never fires. */
     scr_closure_release(cb);
@@ -1158,7 +1158,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
     scr_jb_put_str(&msg, shown);
     scr_str_release(shown);
     ScrStr *text = scr_jb_finish(&msg);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, text->data, text->len, "ERR_INVALID_ARG_VALUE");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "ERR_INVALID_ARG_VALUE");
     scr_str_release(text);
     return;
   }
@@ -1178,7 +1178,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_DGRAM;
   struct addrinfo *res = NULL;
-  int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
+  int rc = getaddrinfo(scr_str_flat_view(hostname)->data, NULL, &hints, &res);
   if (rc == 0 && res) {
     char ip[64] = "0.0.0.0";
     inet_ntop(AF_INET, &((struct sockaddr_in *)res->ai_addr)->sin_addr, ip, sizeof ip);
@@ -1197,7 +1197,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
         : rc == EAI_AGAIN ? "EAI_AGAIN"
                           : "EAI_FAIL";
     char msg[192];
-    snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, hostname->data);
+    snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, scr_str_flat_view(hostname)->data);
     p->errmsg = scr_str_new(msg, strlen(msg));
     p->addr = scr_str_new("", 0);
   }
@@ -1254,7 +1254,7 @@ static int scr_dns_order_of(const ScrDyn *v) {
   if (v->kind != SCR_DYN_STR) return -1;
   for (int i = 0; i < 3; i++) {
     size_t n = strlen(scr_dns_orders[i]);
-    if (v->v.str->len == n && memcmp(v->v.str->data, scr_dns_orders[i], n) == 0) return i;
+    if (scr_str_flat_view(v->v.str)->len == n && memcmp(scr_str_flat_view(v->v.str)->data, scr_dns_orders[i], n) == 0) return i;
   }
   return -1;
 }
@@ -1289,8 +1289,8 @@ static ScrDyn *scr_dns_exception(int rc, const char *syscall, const ScrStr *host
                   : rc == EAI_AGAIN ? -3001
                                     : -3002;
   char msg[320];
-  int len = snprintf(msg, sizeof msg, "%s %s %.*s", syscall, code, (int)(host->len < 255 ? host->len : 255),
-                     host->data);
+  int len = snprintf(msg, sizeof msg, "%s %s %.*s", syscall, code, (int)(scr_str_flat_view(host)->len < 255 ? scr_str_flat_view(host)->len : 255),
+                     scr_str_flat_view(host)->data);
   ScrStr *m = scr_str_new(msg, (size_t)len);
   ScrError *e = scr_error_new(SCR_ERR_ERROR, m);
   scr_str_release(m);
@@ -1306,9 +1306,9 @@ static ScrDyn *scr_dns_exception(int rc, const char *syscall, const ScrStr *host
 static double scr_dns_literal_family(const ScrStr *h) {
   unsigned char buf[16];
   char tmp[64];
-  if (h->len == 0 || h->len >= sizeof tmp) return 0;
-  memcpy(tmp, h->data, h->len);
-  tmp[h->len] = '\0';
+  if (scr_str_flat_view(h)->len == 0 || scr_str_flat_view(h)->len >= sizeof tmp) return 0;
+  memcpy(tmp, scr_str_flat_view(h)->data, scr_str_flat_view(h)->len);
+  tmp[scr_str_flat_view(h)->len] = '\0';
   if (inet_pton(AF_INET, tmp, buf) == 1) return 4;
   if (strchr(tmp, ':') != NULL) {
     char *pct = strchr(tmp, '%');
@@ -1334,8 +1334,8 @@ static void scr_dns_warn_tick(ScrClosure *self) {
 #else
     long pid = (long)getpid();
 #endif
-    fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: %.*s\n", pid, (int)message->len,
-            message->data);
+    fprintf(stderr, "(node:%ld) [DEP0118] DeprecationWarning: %.*s\n", pid, (int)scr_str_flat_view(message)->len,
+            scr_str_flat_view(message)->data);
     if (!scr_warning_trace_hint_shown) {
       scr_warning_trace_hint_shown = true;
       fputs("(Use `node --trace-deprecation ...` to show where the warning was created)\n", stderr);
@@ -1419,8 +1419,8 @@ static void scr_dns_lookup_plain(const ScrDyn *hostname, const ScrDyn *options, 
     }
     v = scr_dyn_obj_get(options, "family", 6);
     if (v != NULL && v->kind != SCR_DYN_UNDEF && v->kind != SCR_DYN_NULL) {
-      if (v->kind == SCR_DYN_STR && v->v.str->len == 4 && memcmp(v->v.str->data, "IPv4", 4) == 0) family = 4;
-      else if (v->kind == SCR_DYN_STR && v->v.str->len == 4 && memcmp(v->v.str->data, "IPv6", 4) == 0) family = 6;
+      if (v->kind == SCR_DYN_STR && scr_str_flat_view(v->v.str)->len == 4 && memcmp(scr_str_flat_view(v->v.str)->data, "IPv4", 4) == 0) family = 4;
+      else if (v->kind == SCR_DYN_STR && scr_str_flat_view(v->v.str)->len == 4 && memcmp(scr_str_flat_view(v->v.str)->data, "IPv6", 4) == 0) family = 6;
       else if (v->kind == SCR_DYN_NUM && (v->v.num == 0 || v->v.num == 4 || v->v.num == 6)) family = v->v.num;
       else {
         scr_dyn_arg_value_fail("options.family", "must be one of: 0, 4, 6", v);
@@ -1464,7 +1464,7 @@ static void scr_dns_lookup_plain(const ScrDyn *hostname, const ScrDyn *options, 
       ScrJsonBuf b;
       scr_jb_init(&b);
       scr_jb_puts(&b, "The provided hostname \"");
-      if (shown) scr_jb_write(&b, shown->data, shown->len);
+      if (shown) scr_jb_write(&b, scr_str_flat_view(shown)->data, scr_str_flat_view(shown)->len);
       scr_jb_puts(&b, "\" is not a valid hostname, and is supported in the dns module solely for compatibility.");
       scr_str_release(shown);
       ScrStr *message = scr_jb_finish(&b);
@@ -1500,7 +1500,7 @@ static void scr_dns_lookup_plain(const ScrDyn *hostname, const ScrDyn *options, 
     }
     return;
   }
-  if (memchr(host->data, '\0', host->len) != NULL) {
+  if (memchr(scr_str_flat_view(host)->data, '\0', scr_str_flat_view(host)->len) != NULL) {
     ScrStr *shown = scr_str_inspect_quoted((ScrStr *)host, true);
     ScrJsonBuf msg;
     scr_jb_init(&msg);
@@ -1508,7 +1508,7 @@ static void scr_dns_lookup_plain(const ScrDyn *hostname, const ScrDyn *options, 
     scr_jb_put_str(&msg, shown);
     scr_str_release(shown);
     ScrStr *text = scr_jb_finish(&msg);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, text->data, text->len, "ERR_INVALID_ARG_VALUE");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "ERR_INVALID_ARG_VALUE");
     scr_str_release(text);
     return;
   }
@@ -1520,7 +1520,7 @@ static void scr_dns_lookup_plain(const ScrDyn *hostname, const ScrDyn *options, 
   hints.ai_family = family == 4 ? AF_INET : family == 6 ? AF_INET6 : AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo *res = NULL;
-  int rc = getaddrinfo(host->data, NULL, &hints, &res);
+  int rc = getaddrinfo(scr_str_flat_view(host)->data, NULL, &hints, &res);
   if (rc != 0 || res == NULL) {
     if (res) freeaddrinfo(res);
     scr_dns_fail(callback, rc != 0 ? rc : EAI_NONAME, host, all, typed);
@@ -1579,7 +1579,7 @@ void scr_dns_lookup_service(const ScrDyn *address, const ScrDyn *port, const Scr
   }
   double p = NAN;
   bool numeric = (port->kind == SCR_DYN_NUM || port->kind == SCR_DYN_STR) && scr_dyn_number_coerce_js(port, &p);
-  if (port->kind == SCR_DYN_STR && port->v.str->len == 0) numeric = false;
+  if (port->kind == SCR_DYN_STR && scr_str_flat_view(port->v.str)->len == 0) numeric = false;
   if (!numeric || !(p >= 0 && p < 65536) || trunc(p) != p) {
     char detail[256];
     const char *d = scr_dyn_specific_type(port, detail, sizeof detail);
@@ -1596,8 +1596,8 @@ void scr_dns_lookup_service(const ScrDyn *address, const ScrDyn *port, const Scr
   memset(&ss, 0, sizeof ss);
   socklen_t len;
   char tmp[64];
-  memcpy(tmp, address->v.str->data, address->v.str->len);
-  tmp[address->v.str->len] = '\0';
+  memcpy(tmp, scr_str_flat_view(address->v.str)->data, scr_str_flat_view(address->v.str)->len);
+  tmp[scr_str_flat_view(address->v.str)->len] = '\0';
   if (fam == 4) {
     struct sockaddr_in *in = (struct sockaddr_in *)&ss;
     in->sin_family = AF_INET;
@@ -1915,7 +1915,7 @@ static bool scr_dgram_dyn_truthy(const ScrDyn *v) {
   case SCR_DYN_NULL: return false;
   case SCR_DYN_BOOL: return v->v.b;
   case SCR_DYN_NUM: return v->v.num == v->v.num && v->v.num != 0;
-  case SCR_DYN_STR: return v->v.str->len > 0;
+  case SCR_DYN_STR: return scr_str_flat_view(v->v.str)->len > 0;
   default: return true;
   }
 }
@@ -1962,7 +1962,7 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
   size_t slice_off = 0, slice_len = 0;
   if (sliced) {
     double bytelen;
-    if (buffer->kind == SCR_DYN_STR) bytelen = (double)buffer->v.str->len;
+    if (buffer->kind == SCR_DYN_STR) bytelen = (double)scr_str_flat_view(buffer->v.str)->len;
     else if (buffer->kind == SCR_DYN_BYTES) bytelen = scr_bytes_byte_len(buffer->v.bytes);
     else {
       scr_dyn_arg_type_fail("buffer", SCR_DGRAM_BUF_EXPECTED, buffer);
@@ -2012,7 +2012,7 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
         port->v.num > 0 && port->v.num < 65536) {
       ok = true;
       portnum = port->v.num;
-    } else if (port->kind == SCR_DYN_STR && port->v.str->len > 0) {
+    } else if (port->kind == SCR_DYN_STR && scr_str_flat_view(port->v.str)->len > 0) {
       ScrStr *ps = scr_str_retain(port->v.str);
       double n = scr_string_to_number(ps);
       scr_str_release(ps);
@@ -2049,7 +2049,7 @@ void scr_dgram_send_chk(ScrDgramSocket *s, const ScrDyn *buffer, const ScrDyn *a
   char *owned = NULL;
   const char *data = buffer->kind == SCR_DYN_STR ? scr_str_utf8(buffer->v.str, &owned)
                                                  : (const char *)byte_input->data;
-  size_t datalen = buffer->kind == SCR_DYN_STR ? buffer->v.str->len
+  size_t datalen = buffer->kind == SCR_DYN_STR ? scr_str_flat_view(buffer->v.str)->len
                                                : (size_t)scr_bytes_byte_len(buffer->v.bytes);
   if (sliced) {
     data += slice_off;

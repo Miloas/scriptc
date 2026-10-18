@@ -1166,13 +1166,13 @@ static ScrDyn *flat_take_element(OpFlat *f) {
   }
   /* a string iterates by code point */
   const ScrStr *s = in->v.str;
-  if (f->idx >= s->len) return NULL;
+  if (f->idx >= scr_str_flat_view(s)->len) return NULL;
   size_t i = f->idx;
-  unsigned char c = (unsigned char)s->data[i];
+  unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
   size_t n = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-  if (i + n > s->len) n = s->len - i;
+  if (i + n > scr_str_flat_view(s)->len) n = scr_str_flat_view(s)->len - i;
   f->idx += n;
-  ScrStr *piece = scr_str_new(s->data + i, n);
+  ScrStr *piece = scr_str_new(scr_str_flat_view(s)->data + i, n);
   ScrDyn *d = scr_dyn_new_str(piece);
   scr_str_release(piece);
   return d;

@@ -54,10 +54,21 @@ export function emitArraySearchHelpers(
   kinds: ReadonlySet<ArraySearchKind>,
   sz: string,
   declare: (line: string) => void,
+  quickjsStrings = false,
 ): string[] {
   const defs: string[] = [];
   for (const kind of [...kinds].sort()) {
     declare("declare double @scr_arr_index_of_ref(ptr, ptr)");
+    if (kind === "str" && quickjsStrings) {
+      defs.push(
+        `define internal double @${arraySearchHelperName(kind)}(ptr %a, ptr %v) ${FN_ATTRS} {`,
+        `entry:`,
+        `  %r = call double @scr_arr_index_of_ref(ptr %a, ptr %v)`,
+        `  ret double %r`,
+        `}`,
+      );
+      continue;
+    }
     const widen = sz === "i64" ? "  %f = zext i32 %f32 to i64" : "  %f = add i32 %f32, 0";
     defs.push(
       `define internal double @${arraySearchHelperName(kind)}(ptr %a, ptr %v) ${FN_ATTRS} {`,

@@ -166,7 +166,7 @@ static void dc_throw_bad_fn_arg(const ScrDyn *cb, const char *arg_name) {
   }
   case SCR_DYN_STR:
     snprintf(detail, sizeof detail, "type string ('%.*s')",
-             (int)(cb->v.str->len < 28 ? cb->v.str->len : 28), cb->v.str->data);
+             (int)(scr_str_flat_view(cb->v.str)->len < 28 ? scr_str_flat_view(cb->v.str)->len : 28), scr_str_flat_view(cb->v.str)->data);
     received = detail;
     break;
 
@@ -428,16 +428,16 @@ double scr_dc_tracing_channel(ScrStr *name) {
   for (size_t i = 0; i < 5; i++) {
     /* "tracing:<name>:<event>" */
     size_t evlen = strlen(dc_trace_events[i]);
-    size_t len = 8 + name->len + 1 + evlen;
+    size_t len = 8 + scr_str_flat_view(name)->len + 1 + evlen;
     char *buf = malloc(len + 1);
     if (!buf) {
       fputs("scriptc: out of memory\n", stderr);
       abort();
     }
     memcpy(buf, "tracing:", 8);
-    memcpy(buf + 8, name->data, name->len);
-    buf[8 + name->len] = ':';
-    memcpy(buf + 8 + name->len + 1, dc_trace_events[i], evlen);
+    memcpy(buf + 8, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+    buf[8 + scr_str_flat_view(name)->len] = ':';
+    memcpy(buf + 8 + scr_str_flat_view(name)->len + 1, dc_trace_events[i], evlen);
     buf[len] = '\0';
     ScrStr *s = scr_str_new(buf, len);
     free(buf);

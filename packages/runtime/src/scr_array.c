@@ -2379,7 +2379,7 @@ static size_t scr_join_size(size_t len, size_t extra) {
  * appending primitive array values. Finish by publishing the terminator. */
 static void scr_join_append(ScrStr **out, const char *bytes, size_t n) {
   ScrStr *s = *out;
-  size_t need = scr_join_size(s->len, n);
+  size_t need = scr_join_size(scr_str_flat_view(s)->len, n);
   if (need > s->cap) {
     const size_t limit = SIZE_MAX - sizeof(ScrStr) - 1;
     size_t cap = s->cap;
@@ -2387,8 +2387,8 @@ static void scr_join_append(ScrStr **out, const char *bytes, size_t n) {
     s = scr_str_regrow(s, cap);
     *out = s;
   }
-  memcpy(s->data + s->len, bytes, n);
-  s->len = need;
+  memcpy(scr_str_flat_view(s)->data + scr_str_flat_view(s)->len, bytes, n);
+  scr_str_flat_view(s)->len = need;
 }
 
 /* `a.slice(start?, end?)` — a fresh shallow copy of the index range,
@@ -4310,36 +4310,46 @@ bool scr_arr_sort_dense(ScrArr *a, ScrClosure *f, uint32_t arity, bool owned, in
 static ScrStr *scr_arr_join_dense_str(const ScrArr *a, const ScrStr *sep) {
   const size_t limit = SIZE_MAX - sizeof(ScrStr) - 1;
   size_t n = a->len;
-  if (n > 1 && sep->len > limit / (n - 1)) scr_arr_oom();
-  size_t total = n > 1 ? (n - 1) * sep->len : 0;
+  if (n > 1 && scr_str_flat_view(sep)->len > limit / (n - 1)) scr_arr_oom();
+  size_t total = n > 1 ? (n - 1) * scr_str_flat_view(sep)->len : 0;
   bool ascii = n < 2 || sep->ascii, lone = scr_wtf8_any();
-  bool lead_low = lone && n > 1 && scr_wtf8_low_at(sep->data);
+  bool lead_low = lone && n > 1 && scr_wtf8_low_at(scr_str_flat_view(sep)->data);
   for (size_t i = 0; i < n; i++) {
     const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(a->data[i]);
     if (!s) continue;
-    total = scr_join_size(total, s->len);
+    total = scr_join_size(total, scr_str_flat_view(s)->len);
     ascii &= s->ascii;
-    if (lone) lead_low |= scr_wtf8_low_at(s->data);
+    if (lone) lead_low |= scr_wtf8_low_at(scr_str_flat_view(s)->data);
   }
   ScrStr *out = scr_str_alloc_raw(total, total);
-  char *w = out->data;
+  char *w = scr_str_flat_view(out)->data;
   for (size_t i = 0; i < n; i++) {
     if (i > 0) {
-      scr_copy_bytes(w, sep->data, sep->len);
-      w += sep->len;
+      scr_copy_bytes(w, scr_str_flat_view(sep)->data, scr_str_flat_view(sep)->len);
+      w += scr_str_flat_view(sep)->len;
     }
     const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(a->data[i]);
     if (!s) continue;
-    scr_copy_bytes(w, s->data, s->len);
-    w += s->len;
+    scr_copy_bytes(w, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+    w += scr_str_flat_view(s)->len;
   }
-  out->data[total] = '\0';
+  scr_str_flat_view(out)->data[total] = '\0';
   if (lead_low) scr_str_fuse_surrogates(out);
   else if (ascii) scr_str_note_ascii(out);
   return out;
 }
 
 ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
+  if (a->elem == SCR_ELEM_STR && a->filled == a->len) {
+    extern ScrStr *scr_proto_arr_join(ScrArr *, ScrStr *);
+    bool prototype = sep->rc != SIZE_MAX && sep->cap == SCR_STR_MAX_CAP;
+    for (size_t i = 0; !prototype && i < a->len; i++) {
+      const ScrStr *s = (ScrStr *)scr_slot_to_ptr(a->data[i]);
+      prototype = s && s->rc != SIZE_MAX && s->cap == SCR_STR_MAX_CAP;
+    }
+    if (prototype) return scr_proto_arr_join(a, sep);
+  }
+
   if (a->elem == SCR_ELEM_STR && a->filled == a->len) return scr_arr_join_dense_str(a, sep);
   size_t cap = 64;
   /* String widths are already known. Size once to avoid growth and copying
@@ -4347,22 +4357,22 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
    * Numeric formatting stays single-pass rather than formatting twice. */
   if (a->elem == SCR_ELEM_STR) {
     const size_t limit = SIZE_MAX - sizeof(ScrStr) - 1;
-    if (a->len > 1 && sep->len > limit / (a->len - 1)) scr_arr_oom();
-    cap = a->len > 1 ? (a->len - 1) * sep->len : 0;
+    if (a->len > 1 && scr_str_flat_view(sep)->len > limit / (a->len - 1)) scr_arr_oom();
+    cap = a->len > 1 ? (a->len - 1) * scr_str_flat_view(sep)->len : 0;
     for (size_t i = 0; i < a->len; i++) {
       uint64_t slot;
       if (scr_arr_state_at(a, i, &slot) != SCR_ARR_VALUE) continue;
       const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(slot);
-      if (s) cap = scr_join_size(cap, s->len);
+      if (s) cap = scr_join_size(cap, scr_str_flat_view(s)->len);
     }
   }
   ScrStr *out = scr_str_alloc_raw(0, cap);
   /* Only a piece starting with a lone low surrogate can complete a pair
    * across its seam; the finished string then needs fusing. */
   bool lone = scr_wtf8_any();
-  bool lead_low = lone && a->len > 1 && scr_wtf8_low_at(sep->data);
+  bool lead_low = lone && a->len > 1 && scr_wtf8_low_at(scr_str_flat_view(sep)->data);
   for (size_t i = 0; i < a->len; i++) {
-    if (i > 0) scr_join_append(&out, sep->data, sep->len);
+    if (i > 0) scr_join_append(&out, scr_str_flat_view(sep)->data, scr_str_flat_view(sep)->len);
     uint64_t slot;
     uint8_t state = scr_arr_state_at(a, i, &slot);
     if (state != SCR_ARR_VALUE) continue;
@@ -4380,8 +4390,8 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
       case SCR_ELEM_STR: {
         const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(slot);
         if (!s) break;
-        if (lone) lead_low |= scr_wtf8_low_at(s->data);
-        scr_join_append(&out, s->data, s->len);
+        if (lone) lead_low |= scr_wtf8_low_at(scr_str_flat_view(s)->data);
+        scr_join_append(&out, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
         break;
       }
       case SCR_ELEM_ARR:
@@ -4391,7 +4401,7 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
         scr_trap("scriptc: internal error: join on a ref-element array\n");
     }
   }
-  out->data[out->len] = '\0';
+  scr_str_flat_view(out)->data[scr_str_flat_view(out)->len] = '\0';
   if (lead_low) scr_str_fuse_surrogates(out);
   return out;
 }
@@ -4407,17 +4417,17 @@ ScrStr *scr_str_raw(ScrArr *raw, ScrArr *subs) {
     uint64_t raw_slot;
     if (scr_arr_slot_at(raw, i, &raw_slot)) {
       const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(raw_slot);
-      if (s) scr_join_append(&out, s->data, s->len);
+      if (s) scr_join_append(&out, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
     }
     if (i + 1 < raw->len && i < subs->len) {
       uint64_t sub_slot;
       if (scr_arr_slot_at(subs, i, &sub_slot)) {
         const ScrStr *v = (const ScrStr *)scr_slot_to_ptr(sub_slot);
-        if (v) scr_join_append(&out, v->data, v->len);
+        if (v) scr_join_append(&out, scr_str_flat_view(v)->data, scr_str_flat_view(v)->len);
       }
     }
   }
-  out->data[out->len] = '\0';
+  scr_str_flat_view(out)->data[scr_str_flat_view(out)->len] = '\0';
   scr_str_fuse_surrogates(out); /* pieces may complete surrogate pairs */
   return out;
 }

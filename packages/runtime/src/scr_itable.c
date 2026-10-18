@@ -244,7 +244,7 @@ static uint32_t scr_itable_str_hash32(const ScrStr *s) {
   uint32_t h = s->hash;
   if (h != 0) return h;
 #endif
-  uint64_t wide = scr_key_hash(s->data, s->len);
+  uint64_t wide = scr_key_hash(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
   uint32_t folded = (uint32_t)(wide ^ (wide >> 32));
   if (folded == 0) folded = 1;
 #if SCR_STR_HASH_CACHE
@@ -254,7 +254,7 @@ static uint32_t scr_itable_str_hash32(const ScrStr *s) {
 }
 
 static inline uint64_t scr_itable_str_hash(const ScrStr *s) {
-  return scr_key_mix((uint64_t)scr_itable_str_hash32(s) | ((uint64_t)s->len << 32));
+  return scr_key_mix((uint64_t)scr_itable_str_hash32(s) | ((uint64_t)scr_str_flat_view(s)->len << 32));
 }
 
 static inline ScrITableSegment *scr_itable_segment(ScrITable *t, uint64_t hash) {
@@ -306,7 +306,7 @@ const ScrITableEntry *scr_itable_find_str(ScrITable *t, const ScrStr *key) {
   uint64_t hash = scr_itable_str_hash(key);
   ScrITableSegment *seg = scr_itable_segment(t, hash);
   return (const ScrITableEntry *)scr_itable_probe_bytes(
-      atomic_load_explicit(&seg->index, memory_order_acquire), hash, key->data, key->len);
+      atomic_load_explicit(&seg->index, memory_order_acquire), hash, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
 }
 
 const ScrITableEntry *scr_itable_find_f64(ScrITable *t, double key) {
@@ -429,7 +429,7 @@ static const ScrITableEntry *scr_itable_insert_bytes(ScrITable *t, uint64_t hash
 const ScrITableEntry *scr_itable_insert_str(ScrITable *t, const ScrStr *key, uint64_t value) {
   scr_itable_enter();
   scr_sa_thread_shares(); /* the stored value graph is read by every thread */
-  return scr_itable_insert_bytes(t, scr_itable_str_hash(key), key->data, key->len, value);
+  return scr_itable_insert_bytes(t, scr_itable_str_hash(key), scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, value);
 }
 
 const ScrITableEntry *scr_itable_insert_f64(ScrITable *t, double key, uint64_t value) {
@@ -511,8 +511,8 @@ static bool scr_itable_encoded_size(const ScrArr *key, int kind, size_t *out) {
       uint64_t slot = 0;
       if (scr_itable_element(&walk, i, &slot) == SCR_ARR_VALUE) {
         const ScrStr *s = (const ScrStr *)(uintptr_t)slot;
-        if (s->len > SCR_ITABLE_MAX_KEY_BYTES - add) add = SCR_ITABLE_MAX_KEY_BYTES + 1;
-        else add += s->len;
+        if (scr_str_flat_view(s)->len > SCR_ITABLE_MAX_KEY_BYTES - add) add = SCR_ITABLE_MAX_KEY_BYTES + 1;
+        else add += scr_str_flat_view(s)->len;
       }
     }
     if (add > SCR_ITABLE_MAX_KEY_BYTES - n) {
@@ -544,12 +544,12 @@ static void scr_itable_encode(const ScrArr *key, int kind, char *out) {
       n += 8;
     } else {
       const ScrStr *s = present ? (const ScrStr *)(uintptr_t)slot : NULL;
-      uint32_t len = s ? (uint32_t)s->len : SCR_ITABLE_ABSENT_STR;
+      uint32_t len = s ? (uint32_t)scr_str_flat_view(s)->len : SCR_ITABLE_ABSENT_STR;
       memcpy(out + n, &len, 4);
       n += 4;
       if (s) {
-        memcpy(out + n, s->data, s->len);
-        n += s->len;
+        memcpy(out + n, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+        n += scr_str_flat_view(s)->len;
       }
     }
   }
@@ -615,16 +615,16 @@ static ScrITable *scr_itable_registry;
 ScrITable *scr_itable_open(const ScrStr *name, int key_kind) {
   scr_itable_lock(&scr_itable_registry_lock);
   ScrITable *t = scr_itable_registry;
-  while (t && !(t->name_len == name->len && memcmp(t->name, name->data, name->len) == 0)) t = t->next;
+  while (t && !(t->name_len == scr_str_flat_view(name)->len && memcmp(t->name, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len) == 0)) t = t->next;
   if (!t) {
     /* Segments are cache-line aligned; tables are never freed, so the
      * block's start need not be kept. */
-    char *block = calloc(1, sizeof(ScrITable) + name->len + 63);
+    char *block = calloc(1, sizeof(ScrITable) + scr_str_flat_view(name)->len + 63);
     if (!block) scr_itable_oom();
     t = (ScrITable *)(((uintptr_t)block + 63) & ~(uintptr_t)63);
     t->key_kind = key_kind;
-    t->name_len = name->len;
-    memcpy(t->name, name->data, name->len);
+    t->name_len = scr_str_flat_view(name)->len;
+    memcpy(t->name, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     t->next = scr_itable_registry;
     scr_itable_registry = t;
   }

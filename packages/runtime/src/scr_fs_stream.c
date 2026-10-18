@@ -327,9 +327,9 @@ static void scr_fss_construct(ScrClosure *cb, ScrStream *s) {
     return;
   }
   ScrFssOp *op = scr_fss_op_new(s, SCR_FSS_OPEN, -1);
-  op->path = malloc(f->cpath->len + 1);
+  op->path = malloc(scr_str_flat_view(f->cpath)->len + 1);
   if (!op->path) scr_fss_oom();
-  memcpy(op->path, f->cpath->data, f->cpath->len + 1);
+  memcpy(op->path, scr_str_flat_view(f->cpath)->data, scr_str_flat_view(f->cpath)->len + 1);
   op->oflags = bits;
   op->mode = (int)mode;
   scr_fss_submit(op);
@@ -567,11 +567,11 @@ static ScrStream *scr_fss_new(const ScrDyn *path, const ScrDyn *opts_in, bool re
     /* setDefaultEncoding(options.encoding) after the Writable constructor:
      * 'buffer' is not an encoding there; utf8 is the default */
     ScrDyn *enc = scr_fss_get(o, "encoding");
-    unknown_encoding = enc && enc->kind == SCR_DYN_STR && enc->v.str->len == 6 &&
-        memcmp(enc->v.str->data, "buffer", 6) == 0;
-    bool other = enc && enc->kind == SCR_DYN_STR && enc->v.str->len > 0 && !unknown_encoding &&
-        !(enc->v.str->len == 4 && memcmp(enc->v.str->data, "utf8", 4) == 0) &&
-        !(enc->v.str->len == 5 && memcmp(enc->v.str->data, "utf-8", 5) == 0);
+    unknown_encoding = enc && enc->kind == SCR_DYN_STR && scr_str_flat_view(enc->v.str)->len == 6 &&
+        memcmp(scr_str_flat_view(enc->v.str)->data, "buffer", 6) == 0;
+    bool other = enc && enc->kind == SCR_DYN_STR && scr_str_flat_view(enc->v.str)->len > 0 && !unknown_encoding &&
+        !(scr_str_flat_view(enc->v.str)->len == 4 && memcmp(scr_str_flat_view(enc->v.str)->data, "utf8", 4) == 0) &&
+        !(scr_str_flat_view(enc->v.str)->len == 5 && memcmp(scr_str_flat_view(enc->v.str)->data, "utf-8", 5) == 0);
     if (enc) scr_dyn_release(enc);
     if (other) {
       scr_fss_unsupported("the WriteStream option 'encoding' is not supported yet (utf8, the default, is the write-side string encoding)");
@@ -650,9 +650,9 @@ ScrDyn *scr_fs_stream_path_value(ScrStream *s) {
 ScrDyn *scr_fs_stream_prop_dyn(ScrStream *s, ScrStr *name) {
   ScrFsStream *f = scr_fss_of(s);
   if (f == NULL) return scr_dyn_retain(scr_dyn_undefined());
-  if (strcmp(name->data, f->readable ? "bytesRead" : "bytesWritten") == 0) return scr_dyn_new_num(f->bytes);
-  if (strcmp(name->data, "pending") == 0) return scr_dyn_new_bool(f->fd < 0);
-  if (strcmp(name->data, "path") == 0) return scr_fs_stream_path_value(s);
+  if (strcmp(scr_str_flat_view(name)->data, f->readable ? "bytesRead" : "bytesWritten") == 0) return scr_dyn_new_num(f->bytes);
+  if (strcmp(scr_str_flat_view(name)->data, "pending") == 0) return scr_dyn_new_bool(f->fd < 0);
+  if (strcmp(scr_str_flat_view(name)->data, "path") == 0) return scr_fs_stream_path_value(s);
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
@@ -720,7 +720,7 @@ static ScrError *scr_fss_aggregate(ScrError *inner, ScrError *outer) {
     scr_dyn_release(list);
     /* err.code = outerError.code (a property the program may have set) */
     ScrDyn *code = scr_dyn_obj_read(outer_value, "code", 4);
-    if (code && code->kind == SCR_DYN_STR) scr_error_set_code(agg, code->v.str->data);
+    if (code && code->kind == SCR_DYN_STR) scr_error_set_code(agg, scr_str_flat_view(code->v.str)->data);
     scr_dyn_release(code);
     scr_dyn_release(outer_value);
     return agg;

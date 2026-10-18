@@ -289,7 +289,7 @@ ScrWatcher *scr_fs_watch(ScrStr *path, ScrClosure *cb /*moves, nullable*/, ScrWa
     return NULL; /* exception pending */
   }
 #else
-  int fd = open(path->data, O_EVTONLY | O_NONBLOCK | O_CLOEXEC);
+  int fd = open(scr_str_flat_view(path)->data, O_EVTONLY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) {
     if (cb != NULL) scr_closure_release(cb);
     scr_fs_throw(errno, "watch", path);
@@ -454,7 +454,7 @@ static void scr_watch_dispatch(void) {
          * OLD fd closes first (its filter dies with it) — a coalesced
          * change on the old inode is superseded by the rename. */
         close(w->fd);
-        w->fd = open(w->path->data, O_EVTONLY | O_NONBLOCK | O_CLOEXEC);
+        w->fd = open(scr_str_flat_view(w->path)->data, O_EVTONLY | O_NONBLOCK | O_CLOEXEC);
         if (w->fd >= 0 && !scr_watch_arm(w)) {
           close(w->fd);
           w->fd = -1;

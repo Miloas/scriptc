@@ -288,30 +288,30 @@ static ScrStr *scr_error_format(ScrError *e, ScrStr *name, ScrStr *message) {
    * the code-prefix test is exact for runtime-thrown errors; a user
    * assigning an ERR_* code onto a plain Error would bracket here where
    * Node would not (documented — user code owns that spelling). */
-  bool assertion = !e->native_plain && name && e->code && e->code->len >= 4 &&
-                   memcmp(e->code->data, "ERR_", 4) == 0;
-  if (!name || name->len == 0) {
+  bool assertion = !e->native_plain && name && e->code && scr_str_flat_view(e->code)->len >= 4 &&
+                   memcmp(scr_str_flat_view(e->code)->data, "ERR_", 4) == 0;
+  if (!name || scr_str_flat_view(name)->len == 0) {
     return message ? scr_str_retain(message) : scr_str_new("", 0);
   }
-  if (!assertion && (!message || message->len == 0)) return scr_str_retain(name);
-  size_t msglen = message ? message->len : 0;
-  size_t codelen = assertion ? e->code->len + 3 : 0; /* " [" + code + "]" */
-  size_t len = name->len + codelen + 2 + msglen;
+  if (!assertion && (!message || scr_str_flat_view(message)->len == 0)) return scr_str_retain(name);
+  size_t msglen = message ? scr_str_flat_view(message)->len : 0;
+  size_t codelen = assertion ? scr_str_flat_view(e->code)->len + 3 : 0; /* " [" + code + "]" */
+  size_t len = scr_str_flat_view(name)->len + codelen + 2 + msglen;
   char *buf = malloc(len);
   if (!buf) scr_error_oom();
   size_t n = 0;
-  memcpy(buf + n, name->data, name->len);
-  n += name->len;
+  memcpy(buf + n, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+  n += scr_str_flat_view(name)->len;
   if (assertion) {
     buf[n++] = ' ';
     buf[n++] = '[';
-    memcpy(buf + n, e->code->data, e->code->len);
-    n += e->code->len;
+    memcpy(buf + n, scr_str_flat_view(e->code)->data, scr_str_flat_view(e->code)->len);
+    n += scr_str_flat_view(e->code)->len;
     buf[n++] = ']';
   }
   buf[n++] = ':';
   buf[n++] = ' ';
-  if (message) memcpy(buf + n, message->data, message->len);
+  if (message) memcpy(buf + n, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len);
   n += msglen;
   ScrStr *out = scr_str_new(buf, n);
   free(buf);
@@ -419,8 +419,8 @@ const char *scr_error_message_code(const ScrStr *msg) {
   };
   for (size_t i = 0; i < sizeof known / sizeof known[0]; i++) {
     size_t n = strlen(known[i].prefix);
-    if (msg->len < n || memcmp(msg->data, known[i].prefix, n) != 0) continue;
-    if (known[i].whole ? msg->len == n : (msg->len == n || msg->data[n] == ';' || msg->data[n] == ':'))
+    if (scr_str_flat_view(msg)->len < n || memcmp(scr_str_flat_view(msg)->data, known[i].prefix, n) != 0) continue;
+    if (known[i].whole ? scr_str_flat_view(msg)->len == n : (scr_str_flat_view(msg)->len == n || scr_str_flat_view(msg)->data[n] == ';' || scr_str_flat_view(msg)->data[n] == ':'))
       return known[i].code;
   }
   return NULL;
@@ -449,7 +449,7 @@ void scr_throw_error_msg_code(int kind, const char *message, size_t len,
  * (catchably — call sites are compiler-emitted pending checks). */
 void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg) {
   ScrError *e = scr_error_new((int)kind, (ScrStr *)msg); /* borrowed in */
-  if (code->len > 0) {
+  if (scr_str_flat_view(code)->len > 0) {
     scr_str_release(e->code); /* NULL-safe */
     e->code = scr_str_retain((ScrStr *)code);
   }
@@ -463,13 +463,13 @@ void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg) {
  * (catchably — callers are compiler-emitted pending checks). */
 void scr_undef_global_read(ScrStr *name) {
   static const char suffix[] = " is not defined";
-  size_t len = name->len + sizeof suffix - 1;
+  size_t len = scr_str_flat_view(name)->len + sizeof suffix - 1;
   char *msg = malloc(len + 1);
   if (!msg) {
     scr_trap("scriptc: out of memory\n");
   }
-  memcpy(msg, name->data, name->len);
-  memcpy(msg + name->len, suffix, sizeof suffix);
+  memcpy(msg, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+  memcpy(msg + scr_str_flat_view(name)->len, suffix, sizeof suffix);
   ScrStr *m = scr_str_new(msg, len);
   free(msg);
   scr_throw_error_named(scr_str_new("ReferenceError", 14), m);
@@ -502,7 +502,7 @@ double scr_domex_code_of(const ScrStr *name) {
   for (size_t i = 0; i < sizeof scr_domex_codes / sizeof scr_domex_codes[0]; i++) {
     const char *n = scr_domex_codes[i].name;
     size_t len = strlen(n);
-    if (name->len == len && memcmp(name->data, n, len) == 0) {
+    if (scr_str_flat_view(name)->len == len && memcmp(scr_str_flat_view(name)->data, n, len) == 0) {
       return scr_domex_codes[i].code;
     }
   }
@@ -540,7 +540,7 @@ void scr_throw_error_named(ScrStr *name, ScrStr *message) {
   for (int i = 1; i < SCR_ERR_COUNT; i++) {
     if (i == SCR_ERR_DOMEX) continue;
     const char *n = scr_error_names[i];
-    if (name->len == strlen(n) && memcmp(name->data, n, name->len) == 0) {
+    if (scr_str_flat_view(name)->len == strlen(n) && memcmp(scr_str_flat_view(name)->data, n, scr_str_flat_view(name)->len) == 0) {
       kind = i;
       break;
     }
@@ -548,7 +548,7 @@ void scr_throw_error_named(ScrStr *name, ScrStr *message) {
   ScrError *e = scr_error_alloc(kind);
   e->name = name;       /* ownership moves in (engine names may be custom) */
   e->message = message; /* ownership moves in */
-  e->name_present = kind == SCR_ERR_ERROR && !(name->len == 5 && memcmp(name->data, "Error", 5) == 0);
+  e->name_present = kind == SCR_ERR_ERROR && !(scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "Error", 5) == 0);
   e->message_present = true;
   scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v,
                  scr_error_traced ? &scr_error_trace : NULL);

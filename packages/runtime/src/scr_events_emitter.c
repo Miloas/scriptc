@@ -175,8 +175,8 @@ static bool scr_ee_is_error_monitor(const ScrStr *name) { return name == SCR_EE_
 static ScrEeBucket *scr_ee_bucket_find(ScrEeReg *reg, const char *name, size_t len) {
   if (!reg) return NULL;
   for (ScrEeBucket *b = reg->head; b; b = b->next) {
-    if (b->name->len == len && !scr_ee_is_error_monitor(b->name) &&
-        memcmp(b->name->data, name, len) == 0)
+    if (scr_str_flat_view(b->name)->len == len && !scr_ee_is_error_monitor(b->name) &&
+        memcmp(scr_str_flat_view(b->name)->data, name, len) == 0)
       return b;
   }
   return NULL;
@@ -184,7 +184,7 @@ static ScrEeBucket *scr_ee_bucket_find(ScrEeReg *reg, const char *name, size_t l
 
 /* The bucket of a registry key: a string name or the errorMonitor key. */
 static ScrEeBucket *scr_ee_bucket_of(ScrEeReg *reg, const ScrStr *name) {
-  if (!scr_ee_is_error_monitor(name)) return scr_ee_bucket_find(reg, name->data, name->len);
+  if (!scr_ee_is_error_monitor(name)) return scr_ee_bucket_find(reg, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
   if (!reg) return NULL;
   for (ScrEeBucket *b = reg->head; b; b = b->next) {
     if (b->name == name) return b;
@@ -383,7 +383,7 @@ static void scr_ee_warn_tick(ScrClosure *self) {
   } else {
     fflush(stdout);
     fprintf(stderr, "(node:%ld) MaxListenersExceededWarning: %.*s\n", SCR_EE_PID(),
-            (int)message->len, message->data);
+            (int)scr_str_flat_view(message)->len, scr_str_flat_view(message)->data);
     if (!scr_warning_trace_hint_shown) {
       scr_warning_trace_hint_shown = true;
       fputs("(Use `node --trace-warnings ...` to show where the warning was created)\n", stderr);
@@ -408,7 +408,7 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
   scr_jb_puts(&text, "Possible EventEmitter memory leak detected. ");
   scr_jb_puts(&text, count);
   scr_jb_putc(&text, ' ');
-  scr_jb_write(&text, b->name->data, b->name->len);
+  scr_jb_write(&text, scr_str_flat_view(b->name)->data, scr_str_flat_view(b->name)->len);
   scr_jb_puts(&text, " listeners added to [");
   scr_jb_puts(&text, em->cls);
   scr_jb_puts(&text, "]. MaxListeners is ");
@@ -812,7 +812,7 @@ ScrEmitter *scr_emitter_remove_all(ScrEmitter *em, ScrStr *name, bool all) {
   for (;;) {
     ScrEeBucket *pick = NULL;
     for (ScrEeBucket *b = reg->head; b; b = b->next) {
-      if (b->name->len == 14 && memcmp(b->name->data, "removeListener", 14) == 0) continue;
+      if (scr_str_flat_view(b->name)->len == 14 && memcmp(scr_str_flat_view(b->name)->data, "removeListener", 14) == 0) continue;
       pick = b;
       break;
     }
@@ -851,7 +851,7 @@ static void scr_ee_emit_error_monitor(ScrEmitter *em, va_list *ap_template,
 
 static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template,
                              ScrDyn *const *flex_args, size_t flex_argc) {
-  if (name->len == 5 && memcmp(name->data, "error", 5) == 0) {
+  if (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "error", 5) == 0) {
     scr_ee_emit_error_monitor(em, ap_template, flex_args, flex_argc);
     if (scr_exc_pending()) return true;
   }
@@ -931,7 +931,7 @@ bool scr_emitter_emit(ScrEmitter *em, ScrStr *name, ...) {
 }
 
 bool scr_emitter_emit_flex(ScrEmitter *em, ScrStr *name, ScrDyn *const *args, size_t argc) {
-  if (name->len == 5 && memcmp(name->data, "error", 5) == 0) {
+  if (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "error", 5) == 0) {
     scr_trap("scriptc: computed event collided with the error event\n");
   }
   return scr_ee_emit_core(em, name, NULL, args, argc);
@@ -1085,7 +1085,7 @@ double scr_emitter_get_max(ScrEmitter *em) {
  * split). Borrowed. */
 void scr_emitter_set_default_max_chk(const ScrDyn *n, const ScrStr *name) {
   if (n->kind != SCR_DYN_NUM) {
-    scr_dyn_arg_type_fail(name->data, "of type number", n);
+    scr_dyn_arg_type_fail(scr_str_flat_view(name)->data, "of type number", n);
     return;
   }
   if (!(n->v.num >= 0)) {
@@ -1094,7 +1094,7 @@ void scr_emitter_set_default_max_chk(const ScrDyn *n, const ScrStr *name) {
     char msg[128];
     int len = snprintf(msg, sizeof msg,
                        "The value of \"%s\" is out of range. It must be >= 0. Received %.*s",
-                       name->data, (int)nlen, num);
+                       scr_str_flat_view(name)->data, (int)nlen, num);
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
     return;
   }

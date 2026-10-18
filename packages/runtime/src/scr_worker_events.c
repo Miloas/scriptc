@@ -187,7 +187,7 @@ static void scr_worker_view_release(void *ptr) {
 
 static void scr_worker_port_listeners(void *ptr, const ScrStr *name, bool present) {
   ScrWorkerView *view = ptr;
-  if (name->len != 7 || memcmp(name->data, "message", 7)) return;
+  if (scr_str_flat_view(name)->len != 7 || memcmp(scr_str_flat_view(name)->data, "message", 7)) return;
   if (present) view->started = true;
   view->referenced = present;
 }
@@ -518,7 +518,7 @@ static ScrDyn *scr_worker_view_get(void *ptr, const char *key, size_t length) {
     /* a copy: the thread record's name is freed with the record, which
      * a string value can outlive */
     const ScrStr *name = scr_worker_thread_name(view->thread);
-    ScrStr *copy = scr_str_new(name->data, name->len);
+    ScrStr *copy = scr_str_new(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     ScrDyn *value = scr_dyn_new_str(copy);
     scr_str_release(copy);
     return value;
@@ -957,7 +957,7 @@ static ScrDyn *scr_broadcast_invoke(void *ptr, ScrDyn *self, const char *method,
     ScrMessage *first = scr_message_encode(args[0]);
     if (!first) return NULL;
     ScrChannel **peers = NULL;
-    size_t n = scr_broadcast_peers(view->name->data, view->name->len, view->channel, &peers);
+    size_t n = scr_broadcast_peers(scr_str_flat_view(view->name)->data, scr_str_flat_view(view->name)->len, view->channel, &peers);
     for (size_t i = 0; i < n; i++) {
       ScrMessage *message = i == 0 ? first : scr_message_encode(args[0]);
       if (i == 0) first = NULL;
@@ -1065,7 +1065,7 @@ ScrDyn *scr_worker_broadcast_channel(ScrDyn *args) {
   view->et = scr_et_broadcast_ops->core_new("BroadcastChannel");
   view->started = true;
   view->referenced = true;
-  scr_broadcast_join(name->data, name->len, view->channel);
+  scr_broadcast_join(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, view->channel);
   return scr_dyn_new_handle(view, SCR_DYNH_BROADCAST_CHANNEL);
 }
 
@@ -1249,7 +1249,7 @@ static ScrArr *scr_worker_arguments(ScrStr *filename, ScrDyn *argv) {
         scr_arr_release(arguments);
         return NULL;
       }
-      if (memchr(text->data, 0, text->len)) {
+      if (memchr(scr_str_flat_view(text)->data, 0, scr_str_flat_view(text)->len)) {
         scr_str_release(text);
         scr_arr_release(arguments);
         scr_worker_refusal("Worker argv strings containing null bytes are not supported yet");

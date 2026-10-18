@@ -623,9 +623,9 @@ static ScrBytes *scr_zlib_input_dyn(const ScrDyn *v, bool callback) {
   }
   if (v->kind == SCR_DYN_STR) {
     ScrStr *str = v->v.str;
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
-    memcpy(b->data, str->data, str->len);
-    if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, str->len);
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(str)->len);
+    memcpy(b->data, scr_str_flat_view(str)->data, scr_str_flat_view(str)->len);
+    if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(str)->len);
     return b;
   }
   if (v->kind == SCR_DYN_BYTES) return scr_bytes_raw_view(v->v.bytes);

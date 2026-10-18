@@ -498,6 +498,7 @@ void scr_library_check_exc(void) {
   } else if (scr_exc_kind == SCR_EXC_OBJ && scr_error_is(scr_exc_payload)) {
     marked = ((const ScrError *)scr_exc_payload)->message;
   }
+  marked = scr_str_flat_view(marked);
   if (marked != NULL && marked->len > 0 && (uint8_t)marked->data[0] == 0x01) {
     size_t take = marked->len > sizeof buf ? sizeof buf : marked->len;
     memcpy(buf, marked->data, take);
@@ -521,7 +522,7 @@ void scr_library_check_exc(void) {
     break;
   }
   case SCR_EXC_STR: {
-    const ScrStr *s = (const ScrStr *)scr_exc_payload;
+    const ScrStr *s = scr_str_flat_view((const ScrStr *)scr_exc_payload);
     size_t take = s->len > cap - n ? cap - n : s->len;
     memcpy(buf + n, s->data, take);
     n += take;
@@ -530,8 +531,9 @@ void scr_library_check_exc(void) {
   case SCR_EXC_OBJ:
     if (scr_error_is(scr_exc_payload)) {
       ScrStr *s = scr_error_to_string((ScrError *)scr_exc_payload);
-      size_t take = s->len > cap - n ? cap - n : s->len;
-      memcpy(buf + n, s->data, take);
+      const ScrStr *flat = scr_str_flat_view(s);
+      size_t take = flat->len > cap - n ? cap - n : flat->len;
+      memcpy(buf + n, flat->data, take);
       n += take;
       scr_str_release(s);
       break;
@@ -637,7 +639,7 @@ bool scr_exc_handle_uncaught(bool from_promise) {
 static bool scr_uncaught_print_dyn_primitive(const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_STR:
-    fwrite(d->v.str->data, 1, d->v.str->len, stderr);
+    fwrite(scr_str_flat_view(d->v.str)->data, 1, scr_str_flat_view(d->v.str)->len, stderr);
     return true;
   case SCR_DYN_NUM: {
     char buf[32];
@@ -662,11 +664,11 @@ static bool scr_uncaught_print_dyn_primitive(const ScrDyn *d) {
 /* An SC diagnostic code ("SC" and four digits) that `text` does not
  * already name as "[SCnnnn". */
 static bool scr_uncaught_unnamed_sc_code(const ScrStr *code, const ScrStr *text) {
-  if (code == NULL || code->len != 6 || code->data[0] != 'S' || code->data[1] != 'C') return false;
+  if (code == NULL || scr_str_flat_view(code)->len != 6 || scr_str_flat_view(code)->data[0] != 'S' || scr_str_flat_view(code)->data[1] != 'C') return false;
   for (size_t i = 2; i < 6; i++)
-    if (code->data[i] < '0' || code->data[i] > '9') return false;
-  for (size_t i = 0; i + 7 <= text->len; i++)
-    if (text->data[i] == '[' && memcmp(text->data + i + 1, code->data, 6) == 0) return false;
+    if (scr_str_flat_view(code)->data[i] < '0' || scr_str_flat_view(code)->data[i] > '9') return false;
+  for (size_t i = 0; i + 7 <= scr_str_flat_view(text)->len; i++)
+    if (scr_str_flat_view(text)->data[i] == '[' && memcmp(scr_str_flat_view(text)->data + i + 1, scr_str_flat_view(code)->data, 6) == 0) return false;
   return true;
 }
 
@@ -696,7 +698,7 @@ void scr_exc_print_uncaught(void) {
     break;
   case SCR_EXC_STR: {
     const ScrStr *s = (const ScrStr *)scr_exc_payload;
-    fwrite(s->data, 1, s->len, stderr);
+    fwrite(scr_str_flat_view(s)->data, 1, scr_str_flat_view(s)->len, stderr);
     break;
   }
   case SCR_EXC_OBJ:
@@ -706,12 +708,12 @@ void scr_exc_print_uncaught(void) {
     if (scr_error_is(scr_exc_payload)) {
       const ScrError *error = (const ScrError *)scr_exc_payload;
       ScrStr *s = scr_error_to_string((ScrError *)scr_exc_payload);
-      fwrite(s->data, 1, s->len, stderr);
+      fwrite(scr_str_flat_view(s)->data, 1, scr_str_flat_view(s)->len, stderr);
       /* A runtime refusal carries its scriptc diagnostic code on `code`;
        * name it unless the message already does, as deferred compile-time
        * refusals' "[SC1090 at file:line]" suffix does. */
       if (scr_uncaught_unnamed_sc_code(error->code, s))
-        fprintf(stderr, " [%.*s]", (int)error->code->len, error->code->data);
+        fprintf(stderr, " [%.*s]", (int)scr_str_flat_view(error->code)->len, scr_str_flat_view(error->code)->data);
       scr_str_release(s);
       break;
     }

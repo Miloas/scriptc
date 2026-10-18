@@ -63,7 +63,7 @@ static void ab_cstr(ScrAssertBuf *b, const char *s) { ab_bytes(b, s, strlen(s));
 
 static void ab_char(ScrAssertBuf *b, char c) { ab_bytes(b, &c, 1); }
 
-static void ab_str(ScrAssertBuf *b, const ScrStr *s) { ab_bytes(b, s->data, s->len); }
+static void ab_str(ScrAssertBuf *b, const ScrStr *s) { ab_bytes(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len); }
 
 static ScrStr *ab_take(ScrAssertBuf *b) {
   ScrStr *out = scr_str_new(b->data ? b->data : "", b->len);
@@ -89,15 +89,15 @@ static size_t scr_assert_inspect_f64(double x, char *buf /* >= 33 */) {
 ScrStr *scr_assert_inspect_str(const ScrStr *s) {
   char quote = '\'';
   bool hasSingle = false, hasDouble = false;
-  for (size_t i = 0; i < s->len; i++) {
-    if (s->data[i] == '\'') hasSingle = true;
-    if (s->data[i] == '"') hasDouble = true;
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    if (scr_str_flat_view(s)->data[i] == '\'') hasSingle = true;
+    if (scr_str_flat_view(s)->data[i] == '"') hasDouble = true;
   }
   if (hasSingle) quote = hasDouble ? '`' : '"';
   ScrAssertBuf b = {0};
   ab_char(&b, quote);
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     if (c == (unsigned char)quote || c == '\\') {
       ab_char(&b, '\\');
       ab_char(&b, (char)c);
@@ -153,7 +153,7 @@ void scr_assert_record_dyn(ScrDyn *actual, ScrDyn *expected, ScrStr *op) {
   };
   const char *name = NULL;
   for (size_t i = 0; i < sizeof operators / sizeof operators[0]; i++) {
-    if (op->len == strlen(operators[i]) && memcmp(op->data, operators[i], op->len) == 0) {
+    if (scr_str_flat_view(op)->len == strlen(operators[i]) && memcmp(scr_str_flat_view(op)->data, operators[i], scr_str_flat_view(op)->len) == 0) {
       name = operators[i];
     }
   }
@@ -222,7 +222,7 @@ void scr_assert_fail(ScrStr *message, bool generated) {
  * (innerFail): the message is kept as is, and generatedMessage is
  * `!message`, so the empty string counts as generated. Borrows msg. */
 static void scr_assert_fail_custom(ScrStr *msg) {
-  scr_assert_fail(scr_str_retain(msg), msg->len == 0);
+  scr_assert_fail(scr_str_retain(msg), scr_str_flat_view(msg)->len == 0);
 }
 
 /* A generated message. */
@@ -319,7 +319,7 @@ void scr_assert_eq_fail(const char *ia, size_t la, const char *ib, size_t lb,
                         int quotes, bool both_zero, bool strings, bool deep,
                         ScrStr *msg, bool has_msg) {
   ScrAssertBuf b = {0};
-  bool custom = has_msg && msg->len > 0;
+  bool custom = has_msg && scr_str_flat_view(msg)->len > 0;
   if (custom) {
     ab_str(&b, msg);
   } else {
@@ -385,17 +385,17 @@ void scr_assert_eq_f64(double a, double b, bool negated, bool deep,
 /* The string forms: byte equality IS SameValue for canonical storage. */
 void scr_assert_eq_str(ScrStr *a, ScrStr *b, bool negated, bool deep,
                        ScrStr *msg, bool has_msg) {
-  bool same = a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  bool same = scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len) == 0;
   if ((negated && !same) || (!negated && same)) return;
   scr_assert_record(scr_dyn_new_str(a), scr_dyn_new_str(b), scr_assert_eq_operator(negated, deep));
   ScrStr *ia = scr_assert_inspect_str(a);
   if (negated) {
-    scr_assert_neq_fail(ia->data, ia->len, deep, msg, has_msg);
+    scr_assert_neq_fail(scr_str_flat_view(ia)->data, scr_str_flat_view(ia)->len, deep, msg, has_msg);
     scr_str_release(ia);
     return;
   }
   ScrStr *ib = scr_assert_inspect_str(b);
-  scr_assert_eq_fail(ia->data, ia->len, ib->data, ib->len, 2, false, true, deep,
+  scr_assert_eq_fail(scr_str_flat_view(ia)->data, scr_str_flat_view(ia)->len, scr_str_flat_view(ib)->data, scr_str_flat_view(ib)->len, 2, false, true, deep,
                      msg, has_msg);
   scr_str_release(ia);
   scr_str_release(ib);
@@ -453,7 +453,7 @@ void scr_assert_deep_result(bool equal, bool negated, ScrStr *msg, bool has_msg)
   if (actual && expected && actual->kind != SCR_DYN_UNDEF && expected->kind != SCR_DYN_UNDEF) {
     if (!negated) {
       scr_assert_fail(scr_assert_dyn_eq_message(actual, expected, true, msg, has_msg, scr_assert_diff_full()),
-                      !(has_msg && msg->len > 0));
+                      !(has_msg && scr_str_flat_view(msg)->len > 0));
     } else if (has_msg) {
       scr_assert_fail_custom(msg);
     } else {
@@ -461,7 +461,7 @@ void scr_assert_deep_result(bool equal, bool negated, ScrStr *msg, bool has_msg)
     }
     return;
   }
-  if (has_msg && (negated || msg->len > 0)) {
+  if (has_msg && (negated || scr_str_flat_view(msg)->len > 0)) {
     /* Node: the not-equal operators use the message ALONE (even empty);
      * the equal operators use it as the diff HEADER when non-empty —
      * without a rendered diff below it the two collapse to the same
@@ -500,7 +500,7 @@ void scr_assert_ref_eq_bytes(const ScrBytes *a, const ScrBytes *b, bool negated,
   bool same = a == b;
   if ((negated && !same) || (!negated && same)) return;
   scr_assert_record(scr_dyn_new_bytes(a), scr_dyn_new_bytes(b), scr_assert_eq_operator(negated, false));
-  if (has_msg && (negated || msg->len > 0)) {
+  if (has_msg && (negated || scr_str_flat_view(msg)->len > 0)) {
     /* The deepResult message stance: not-equal operators use it alone
      * (even empty); the equal operators use a non-empty one as the diff
      * header — headerless diffs collapse both to the message itself. */
@@ -528,7 +528,7 @@ void scr_assert_ref_eq_fn(const ScrClosure *a, const ScrClosure *b, bool negated
   /* Function values have no runtime box here; actual and expected stay
    * undefined. */
   scr_assert_record(NULL, NULL, scr_assert_eq_operator(negated, false));
-  if (has_msg && (negated || msg->len > 0)) {
+  if (has_msg && (negated || scr_str_flat_view(msg)->len > 0)) {
     scr_assert_fail_custom(msg);
     return;
   }
@@ -576,8 +576,8 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
     case SCR_DYN_NUM:
       return scr_assert_same_value_f64(a->v.num, b->v.num);
     case SCR_DYN_STR:
-      return a->v.str->len == b->v.str->len &&
-             memcmp(a->v.str->data, b->v.str->data, a->v.str->len) == 0;
+      return scr_str_flat_view(a->v.str)->len == scr_str_flat_view(b->v.str)->len &&
+             memcmp(scr_str_flat_view(a->v.str)->data, scr_str_flat_view(b->v.str)->data, scr_str_flat_view(a->v.str)->len) == 0;
     case SCR_DYN_FUNC:
       return scr_dyn_strict_eq(a, b);
     case SCR_DYN_HANDLE:
@@ -640,8 +640,8 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
     case SCR_DYN_NUM:
       return scr_assert_same_value_f64(a->v.num, b->v.num);
     case SCR_DYN_STR:
-      return a->v.str->len == b->v.str->len &&
-             memcmp(a->v.str->data, b->v.str->data, a->v.str->len) == 0;
+      return scr_str_flat_view(a->v.str)->len == scr_str_flat_view(b->v.str)->len &&
+             memcmp(scr_str_flat_view(a->v.str)->data, scr_str_flat_view(b->v.str)->data, scr_str_flat_view(a->v.str)->len) == 0;
     case SCR_DYN_FUNC:
       return scr_dyn_strict_eq(a, b);
     case SCR_DYN_HANDLE:
@@ -1331,7 +1331,7 @@ static void scr_assert_cf_error(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
   ab_char(b, '[');
   if (name->kind == SCR_DYN_STR) ab_str(b, name->v.str);
   else ab_cstr(b, "Error");
-  if (message->kind == SCR_DYN_STR && message->v.str->len > 0) {
+  if (message->kind == SCR_DYN_STR && scr_str_flat_view(message->v.str)->len > 0) {
     ab_cstr(b, ": ");
     ab_str(b, message->v.str);
   }
@@ -1562,7 +1562,7 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
       ScrDyn *materialized = scr_dyn_typed_ref_materialize(d);
       const ScrStr *cls = scr_dyn_typed_ref_class_name(d);
       if (cls && materialized->kind == SCR_DYN_OBJ && scr_dyn_obj_get(materialized, "%error", 6) == NULL)
-        scr_assert_cf_object(b, materialized, indent, depth, cls->data);
+        scr_assert_cf_object(b, materialized, indent, depth, scr_str_flat_view(cls)->data);
       else
         scr_assert_cf_value(b, materialized, indent, depth);
       scr_dyn_release(materialized);
@@ -1601,15 +1601,15 @@ typedef struct {
  * renderer never emits a final \n, matching String.prototype.split). */
 static ScrLine *scr_assert_split_lines(const ScrStr *text, size_t *out_n) {
   size_t n = 1;
-  for (size_t i = 0; i < text->len; i++) {
-    if (text->data[i] == '\n') n++;
+  for (size_t i = 0; i < scr_str_flat_view(text)->len; i++) {
+    if (scr_str_flat_view(text)->data[i] == '\n') n++;
   }
   ScrLine *lines = malloc(n * sizeof *lines);
   if (!lines) scr_assert_oom();
   size_t li = 0, start = 0;
-  for (size_t i = 0; i <= text->len; i++) {
-    if (i == text->len || text->data[i] == '\n') {
-      lines[li].s = text->data + start;
+  for (size_t i = 0; i <= scr_str_flat_view(text)->len; i++) {
+    if (i == scr_str_flat_view(text)->len || scr_str_flat_view(text)->data[i] == '\n') {
+      lines[li].s = scr_str_flat_view(text)->data + start;
       lines[li].len = i - start;
       li++;
       start = i + 1;
@@ -1816,15 +1816,15 @@ static ScrStr *scr_assert_dyn_diff_message(ScrDyn *a, ScrDyn *b, bool deep, cons
   const char *customOrHeader = header; /* resolved after operator morphing */
   bool simple = an == 1 && en == 1 &&
                 (!scr_assert_dyn_is_object(a) || !scr_assert_dyn_is_object(b));
-  bool inspEq = ia->len == ib->len && memcmp(ia->data, ib->data, ia->len) == 0;
+  bool inspEq = scr_str_flat_view(ia)->len == scr_str_flat_view(ib)->len && memcmp(scr_str_flat_view(ia)->data, scr_str_flat_view(ib)->data, scr_str_flat_view(ia)->len) == 0;
 
   if (simple) {
-    if (has_msg && msg->len > 0) {
+    if (has_msg && scr_str_flat_view(msg)->len > 0) {
       ab_str(&out, msg);
     } else {
       ab_cstr(&out, customOrHeader);
     }
-    size_t la = ia->len, lb = ib->len;
+    size_t la = scr_str_flat_view(ia)->len, lb = scr_str_flat_view(ib)->len;
     size_t stringsLen = la + lb;
     if (a->kind == SCR_DYN_STR) stringsLen -= 2;
     if (b->kind == SCR_DYN_STR) stringsLen -= 2;
@@ -1846,7 +1846,7 @@ static ScrStr *scr_assert_dyn_diff_message(ScrDyn *a, ScrDyn *b, bool deep, cons
        * rendered strings), all kinds included. */
       if (la + lb <= 80) {
         size_t i = 0;
-        while (i < la && i < lb && ia->data[i] == ib->data[i]) i++;
+        while (i < la && i < lb && scr_str_flat_view(ia)->data[i] == scr_str_flat_view(ib)->data[i]) i++;
         if (i < la && i >= 3) {
           ab_char(&out, '\n');
           for (size_t k = 0; k < i + 2; k++) ab_char(&out, ' ');
@@ -1859,7 +1859,7 @@ static ScrStr *scr_assert_dyn_diff_message(ScrDyn *a, ScrDyn *b, bool deep, cons
     /* Structurally identical renderings that are not the same reference:
      * the notIdentical banner over the single rendering. */
     const char *ident = "Values have same structure but are not reference-equal:";
-    if (has_msg && msg->len > 0) {
+    if (has_msg && scr_str_flat_view(msg)->len > 0) {
       ab_str(&out, msg);
     } else {
       ab_cstr(&out, ident);
@@ -1884,7 +1884,7 @@ static ScrStr *scr_assert_dyn_diff_message(ScrDyn *a, ScrDyn *b, bool deep, cons
     bool comma = scr_assert_dyn_is_object(a);
     size_t dn = 0;
     ScrDiffOp *diff = scr_assert_myers(alines, an, elines, en, comma, &dn);
-    if (has_msg && msg->len > 0) {
+    if (has_msg && scr_str_flat_view(msg)->len > 0) {
       ab_str(&out, msg);
     } else {
       ab_cstr(&out, customOrHeader);
@@ -1921,7 +1921,7 @@ static ScrStr *scr_assert_dyn_diff_message(ScrDyn *a, ScrDyn *b, bool deep, cons
 static void scr_assert_dyn_eq_fail(ScrDyn *a, ScrDyn *b, bool deep,
                                    ScrStr *msg, bool has_msg) {
   scr_assert_fail(scr_assert_dyn_eq_message(a, b, deep, msg, has_msg, scr_assert_diff_full()),
-                  !(has_msg && msg->len > 0));
+                  !(has_msg && scr_str_flat_view(msg)->len > 0));
 }
 
 static ScrStr *scr_assert_dyn_eq_message(ScrDyn *a, ScrDyn *b, bool deep,
@@ -1960,7 +1960,7 @@ static bool scr_assert_partial_error(const ScrDyn *a, const ScrDyn *b) {
     if (scr_assert_loose_entry(b, props[i], len)) continue;
     const ScrDyn *expected = scr_assert_loose_error_prop(b, props[i], len);
     if (expected->kind == SCR_DYN_UNDEF) continue;
-    if (i == 0 && expected->kind == SCR_DYN_STR && expected->v.str->len == 0) continue;
+    if (i == 0 && expected->kind == SCR_DYN_STR && scr_str_flat_view(expected->v.str)->len == 0) continue;
     if (!scr_assert_partial_eq(scr_assert_loose_error_prop(a, props[i], len), expected)) return false;
   }
   if (scr_dyn_obj_get(b, "cause", 5) != NULL && scr_dyn_obj_get(a, "cause", 5) == NULL) return false;
@@ -2257,7 +2257,7 @@ void scr_assert_partial_deep_result(bool equal, bool negated, ScrStr *msg, bool 
   scr_assert_fail(scr_assert_dyn_diff_message(g_record_actual ? g_record_actual : undef,
                                               g_record_expected ? g_record_expected : undef, true,
                                               scr_assert_partial_header, msg, has_msg, false),
-                  !(has_msg && msg->len > 0));
+                  !(has_msg && scr_str_flat_view(msg)->len > 0));
 }
 
 /* partialDeepStrictEqual where the operands are checked-dynamic values.
@@ -2270,7 +2270,7 @@ void scr_assert_partial_deep_dyn(ScrDyn *a, ScrDyn *b, ScrStr *msg, bool has_msg
   scr_assert_fail(
       scr_assert_dyn_diff_message(a, b, true, scr_assert_partial_header, msg, has_msg,
                                               scr_assert_diff_full()),
-                  !(has_msg && msg->len > 0));
+                  !(has_msg && scr_str_flat_view(msg)->len > 0));
 }
 
 /* The failing NOT-equal operators over dyn operands (values compared
@@ -2409,7 +2409,7 @@ void scr_assert_throws_none(bool rejection, ScrStr *ename, bool has_ename,
     ab_str(&b, ename);
     ab_char(&b, ')');
   }
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     ab_cstr(&b, ": ");
     ab_str(&b, msg);
   } else {
@@ -2430,7 +2430,7 @@ void scr_assert_throws_mismatch(ScrStr *expected_name, ScrError *err,
                                 ScrStr *msg, bool has_msg, bool rejection) {
   /* The expected class has no runtime box here; expected stays undefined. */
   scr_assert_record(scr_dyn_from_error(err), NULL, rejection ? "rejects" : "throws");
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     /* A custom message stands alone (Node's innerFail with the user's
      * message — the instance-of text is the generated form only). */
     scr_assert_fail(scr_str_retain(msg), false);
@@ -2442,7 +2442,7 @@ void scr_assert_throws_mismatch(ScrStr *expected_name, ScrError *err,
   ab_cstr(&b, "\". Received \"");
   if (err->name) ab_str(&b, err->name);
   ab_char(&b, '"');
-  if (err->message && err->message->len > 0) {
+  if (err->message && scr_str_flat_view(err->message)->len > 0) {
     ab_cstr(&b, "\n\nError message:\n\n");
     ab_str(&b, err->message);
   }
@@ -2515,7 +2515,7 @@ ScrStr *scr_assert_shape_actual(int key) {
 }
 
 static bool scr_shape_str_eq(const ScrStr *a, const ScrStr *b) {
-  return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  return scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len) == 0;
 }
 
 /* Does every expected key match the caught error? (The pass check and
@@ -2649,7 +2649,7 @@ void scr_assert_shape_end(ScrStr *msg, bool has_msg, bool rejection) {
    * box here (its regex values exist only as their rendering), so expected
    * stays undefined. */
   scr_assert_record(scr_dyn_from_error(scr_shape.err), NULL, rejection ? "rejects" : "throws");
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     scr_shape_clear();
     scr_assert_fail(scr_str_retain(msg), false);
     return;
@@ -2663,7 +2663,7 @@ void scr_assert_shape_end(ScrStr *msg, bool has_msg, bool rejection) {
 void scr_assert_unwanted_rejection(ScrError *err, ScrStr *msg, bool has_msg) {
   ScrAssertBuf b = {0};
   ab_cstr(&b, "Got unwanted rejection");
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     ab_cstr(&b, ": ");
     ab_str(&b, msg);
   } else {
@@ -2679,7 +2679,7 @@ void scr_assert_unwanted_rejection(ScrError *err, ScrStr *msg, bool has_msg) {
 void scr_assert_unwanted_error(ScrStr *actual_message, bool rejection, ScrStr *msg, bool has_msg) {
   ScrAssertBuf b = {0};
   ab_cstr(&b, rejection ? "Got unwanted rejection" : "Got unwanted exception");
-  if (has_msg && msg->len) {
+  if (has_msg && scr_str_flat_view(msg)->len) {
     ab_cstr(&b, ": ");
     ab_str(&b, msg);
   } else ab_char(&b, '.');
@@ -2720,8 +2720,8 @@ static void scr_assert_iferror_fail(const char *detail, size_t len, ScrDyn *actu
 }
 
 void scr_assert_iferror_err(ScrError *err) {
-  const ScrStr *d = err->message && err->message->len > 0 ? err->message : err->name;
-  scr_assert_iferror_fail(d ? d->data : "", d ? d->len : 0, scr_dyn_from_error(err));
+  const ScrStr *d = err->message && scr_str_flat_view(err->message)->len > 0 ? err->message : err->name;
+  scr_assert_iferror_fail(d ? scr_str_flat_view(d)->data : "", d ? scr_str_flat_view(d)->len : 0, scr_dyn_from_error(err));
 }
 
 void scr_assert_iferror_f64(double x) {
@@ -2732,7 +2732,7 @@ void scr_assert_iferror_f64(double x) {
 
 void scr_assert_iferror_str(ScrStr *s) {
   ScrStr *q = scr_assert_inspect_str(s);
-  scr_assert_iferror_fail(q->data, q->len, scr_dyn_new_str(s));
+  scr_assert_iferror_fail(scr_str_flat_view(q)->data, scr_str_flat_view(q)->len, scr_dyn_new_str(s));
   scr_str_release(q);
 }
 
@@ -2750,14 +2750,14 @@ void scr_assert_iferror_dyn(const ScrDyn *v) {
   if (v->kind == SCR_DYN_OBJ && scr_dyn_obj_get(v, "%error", 6) != NULL) {
     const ScrDyn *msg = scr_dyn_obj_get(v, "message", 7);
     const ScrDyn *name = scr_dyn_obj_get(v, "name", 4);
-    const ScrDyn *d = msg != NULL && msg->kind == SCR_DYN_STR && msg->v.str->len > 0 ? msg : name;
+    const ScrDyn *d = msg != NULL && msg->kind == SCR_DYN_STR && scr_str_flat_view(msg->v.str)->len > 0 ? msg : name;
     if (d != NULL && d->kind == SCR_DYN_STR) {
-      scr_assert_iferror_fail(d->v.str->data, d->v.str->len, scr_dyn_retain((ScrDyn *)v));
+      scr_assert_iferror_fail(scr_str_flat_view(d->v.str)->data, scr_str_flat_view(d->v.str)->len, scr_dyn_retain((ScrDyn *)v));
       return;
     }
   }
   ScrStr *q = scr_assert_cf_inspect(v);
-  scr_assert_iferror_fail(q->data, q->len, scr_dyn_retain((ScrDyn *)v));
+  scr_assert_iferror_fail(scr_str_flat_view(q)->data, scr_str_flat_view(q)->len, scr_dyn_retain((ScrDyn *)v));
   scr_str_release(q);
 }
 
@@ -2767,16 +2767,16 @@ void scr_assert_iferror_dyn(const ScrDyn *v) {
  * one generated from operator, actual and expected. */
 
 static bool scr_assert_op_is(const ScrDyn *op, const char *name) {
-  return op && op->kind == SCR_DYN_STR && op->v.str->len == strlen(name) &&
-         memcmp(op->v.str->data, name, op->v.str->len) == 0;
+  return op && op->kind == SCR_DYN_STR && scr_str_flat_view(op->v.str)->len == strlen(name) &&
+         memcmp(scr_str_flat_view(op->v.str)->data, name, scr_str_flat_view(op->v.str)->len) == 0;
 }
 
 /* `text` past `max` UTF-8 bytes keeps its first `keep` and ends in "...",
  * unless `full` (Node's `diff: 'full'`). */
 static void scr_assert_ab_clipped(ScrAssertBuf *b, const ScrStr *text, size_t max, size_t keep,
                                   bool full) {
-  if (!full && text->len > max) {
-    ab_bytes(b, text->data, keep);
+  if (!full && scr_str_flat_view(text)->len > max) {
+    ab_bytes(b, scr_str_flat_view(text)->data, keep);
     ab_cstr(b, "...");
   } else {
     ab_str(b, text);
@@ -2790,7 +2790,7 @@ static ScrStr *scr_assert_generic_message(const ScrDyn *actual, const ScrDyn *ex
   ScrStr *res = scr_assert_cf_inspect(actual);
   ScrStr *other = scr_assert_cf_inspect(expected);
   ScrAssertBuf b = {0};
-  bool same = res->len == other->len && memcmp(res->data, other->data, res->len) == 0;
+  bool same = scr_str_flat_view(res)->len == scr_str_flat_view(other)->len && memcmp(scr_str_flat_view(res)->data, scr_str_flat_view(other)->data, scr_str_flat_view(res)->len) == 0;
   if (scr_assert_op_is(op, "notDeepEqual") && same) {
     ScrAssertBuf head = {0};
     ab_cstr(&head, "Expected \"actual\" not to be loosely deep-equal to:\n\n");

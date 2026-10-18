@@ -454,7 +454,7 @@ static ScrTlsCli *scr_tls_cli_new2(ScrStr *host, bool reject_unauthorized, const
   }
   /* The host is the verified name; it is also the SNI name unless it is
    * an IP literal. */
-  const char *h = host->len > 0 ? host->data : "localhost";
+  const char *h = scr_str_flat_view(host)->len > 0 ? scr_str_flat_view(host)->data : "localhost";
   c->verify_name = strdup(h);
   if (!c->verify_name) scr_tls_oom();
   if (!scr_tls_is_ip(h)) {
@@ -470,11 +470,11 @@ static ScrTlsCli *scr_tls_cli_new2(ScrStr *host, bool reject_unauthorized, const
 static void scr_tls_cli_set_servername(ScrTlsCli *c, const ScrStr *servername) {
   free(c->hostname);
   c->hostname = NULL;
-  if (servername->len == 0) return;
-  char *z = malloc(servername->len + 1);
+  if (scr_str_flat_view(servername)->len == 0) return;
+  char *z = malloc(scr_str_flat_view(servername)->len + 1);
   if (!z) scr_tls_oom();
-  memcpy(z, servername->data, servername->len);
-  z[servername->len] = '\0';
+  memcpy(z, scr_str_flat_view(servername)->data, scr_str_flat_view(servername)->len);
+  z[scr_str_flat_view(servername)->len] = '\0';
   free(c->verify_name);
   c->verify_name = z;
   if (!scr_tls_is_ip(z)) {
@@ -1129,9 +1129,9 @@ static ScrStr *scr_tls_pool_key(ScrStr *host, bool reject_unauthorized, const ch
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_write(&b, buf, (size_t)n);
-  if (servername != NULL && servername->len > 0 && !scr_str_eq(servername, host)) {
+  if (servername != NULL && scr_str_flat_view(servername)->len > 0 && !scr_str_eq(servername, host)) {
     scr_jb_putc(&b, 's');
-    scr_jb_write(&b, servername->data, servername->len);
+    scr_jb_write(&b, scr_str_flat_view(servername)->data, scr_str_flat_view(servername)->len);
   }
   return scr_jb_finish(&b);
 }
@@ -1450,7 +1450,7 @@ static bool scr_tls_dyn_truthy(const ScrDyn *v) {
   case SCR_DYN_NULL: return false;
   case SCR_DYN_BOOL: return v->v.b;
   case SCR_DYN_NUM: return v->v.num != 0 && v->v.num == v->v.num;
-  case SCR_DYN_STR: return v->v.str->len > 0;
+  case SCR_DYN_STR: return scr_str_flat_view(v->v.str)->len > 0;
   default: return true; /* objects, arrays, functions, handles, bytes */
   }
 }
@@ -1463,8 +1463,8 @@ static bool scr_tls_dyn_truthy(const ScrDyn *v) {
  * 'cert' option"). */
 static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat) {
   if (v->kind == SCR_DYN_STR) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)v->v.str->len);
-    memcpy(b->data, v->v.str->data, v->v.str->len);
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(v->v.str)->len);
+    memcpy(b->data, scr_str_flat_view(v->v.str)->data, scr_str_flat_view(v->v.str)->len);
     return b;
   }
   if (scr_dyn_bytes_is(v, SCR_BYTES_U8)) return v->v.bytes->shared ? scr_bytes_copy(v->v.bytes) : scr_dyn_bytes_unbox(v);
@@ -1489,7 +1489,7 @@ static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat)
     size_t total = 0;
     for (size_t i = 0; i < v->v.arr.len; i++) {
       const ScrDyn *e = v->v.arr.items[i];
-      if (e->kind == SCR_DYN_STR) total += e->v.str->len + 1;
+      if (e->kind == SCR_DYN_STR) total += scr_str_flat_view(e->v.str)->len + 1;
       else if (scr_dyn_bytes_is(e, SCR_BYTES_U8)) total += e->v.bytes->len + 1;
       else {
         scr_dyn_arg_type_fail(what, "of type string or an instance of Buffer or Uint8Array", e);
@@ -1500,8 +1500,8 @@ static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat)
     size_t off = 0;
     for (size_t i = 0; i < v->v.arr.len; i++) {
       const ScrDyn *e = v->v.arr.items[i];
-      size_t n = e->kind == SCR_DYN_STR ? e->v.str->len : e->v.bytes->len;
-      if (e->kind == SCR_DYN_STR) memcpy(b->data + off, e->v.str->data, n);
+      size_t n = e->kind == SCR_DYN_STR ? scr_str_flat_view(e->v.str)->len : e->v.bytes->len;
+      if (e->kind == SCR_DYN_STR) memcpy(b->data + off, scr_str_flat_view(e->v.str)->data, n);
       else scr_bytes_read(e->v.bytes, 0, b->data + off, n);
       off += n;
       b->data[off++] = '\n'; /* PEM blocks join on line boundaries */
@@ -1579,7 +1579,7 @@ static bool scr_tls_opts_validate(const ScrDyn *opts) {
     if (v->kind == SCR_DYN_STR) {
       static const char *const KNOWN[] = { "TLSv1", "TLSv1.1", "TLSv1.2", "TLSv1.3", NULL };
       for (size_t k = 0; KNOWN[k] != NULL; k++) {
-        if (v->v.str->len == strlen(KNOWN[k]) && memcmp(v->v.str->data, KNOWN[k], v->v.str->len) == 0) {
+        if (scr_str_flat_view(v->v.str)->len == strlen(KNOWN[k]) && memcmp(scr_str_flat_view(v->v.str)->data, KNOWN[k], scr_str_flat_view(v->v.str)->len) == 0) {
           valid = true;
           break;
         }
@@ -1590,7 +1590,7 @@ static bool scr_tls_opts_validate(const ScrDyn *opts) {
       char rendered[96];
       if (v->kind == SCR_DYN_STR) {
         snprintf(rendered, sizeof rendered, "\"%.*s\"",
-                 (int)(v->v.str->len < 80 ? v->v.str->len : 80), v->v.str->data);
+                 (int)(scr_str_flat_view(v->v.str)->len < 80 ? scr_str_flat_view(v->v.str)->len : 80), scr_str_flat_view(v->v.str)->data);
       } else {
         /* %j over non-strings: JSON.stringify's scalar renderings. */
         char lite[64];
@@ -1761,8 +1761,8 @@ void scr_tls_ca_certs_chk(const ScrDyn *type, const ScrStr *fence) {
   static const char *const KNOWN[] = { "default", "system", "bundled", "extra", NULL };
   bool valid = false;
   for (size_t i = 0; KNOWN[i] != NULL; i++) {
-    if (type->v.str->len == strlen(KNOWN[i]) &&
-        memcmp(type->v.str->data, KNOWN[i], type->v.str->len) == 0) {
+    if (scr_str_flat_view(type->v.str)->len == strlen(KNOWN[i]) &&
+        memcmp(scr_str_flat_view(type->v.str)->data, KNOWN[i], scr_str_flat_view(type->v.str)->len) == 0) {
       valid = true;
       break;
     }
@@ -1881,7 +1881,7 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
       if (strcmp(e->key, "port") == 0) {
         if (port >= 0) continue; /* the argument form wins, like Node */
         if (v->kind == SCR_DYN_NUM) port = v->v.num;
-        else if (v->kind == SCR_DYN_STR) port = strtod(v->v.str->data, NULL); /* Node coerces numeric strings */
+        else if (v->kind == SCR_DYN_STR) port = strtod(scr_str_flat_view(v->v.str)->data, NULL); /* Node coerces numeric strings */
         else {
           scr_dyn_arg_type_fail("options.port", "of type number", v);
           ok = false;
@@ -1929,7 +1929,7 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
     scr_dyn_arg_type_fail("options.port", "of type number", scr_dyn_undefined());
     ok = false;
   }
-  ScrStr *dial_host = (ScrStr *)(host != NULL && host->len > 0 ? host : opt_host);
+  ScrStr *dial_host = (ScrStr *)(host != NULL && scr_str_flat_view(host)->len > 0 ? host : opt_host);
   if (ok && !scr_net_host_chk(dial_host)) ok = false;
   if (!ok) {
     scr_bytes_release(ca);

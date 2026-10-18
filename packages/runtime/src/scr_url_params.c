@@ -257,8 +257,8 @@ static ScrStr *sp_decode_piece(const char *s, size_t len) {
 /* The urlencoded serializer's byte set: [A-Za-z0-9*\-._] verbatim, space
  * as '+', everything else uppercase %XX. */
 static void sp_encode_piece(UrlBuf *b, const ScrStr *s) {
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     if (c == ' ') {
       ub_push(b, '+');
     } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
@@ -333,7 +333,7 @@ ScrSearchParams *scr_sp_parse(ScrStr *init) {
   ScrSearchParams *sp = sp_alloc();
   char *owned;
   const char *s = scr_str_utf8(init, &owned);
-  size_t len = init->len;
+  size_t len = scr_str_flat_view(init)->len;
   if (len > 0 && s[0] == '?') {
     s++;
     len--;
@@ -390,13 +390,13 @@ static void sp_reload(ScrSearchParams *sp, ScrStr *query) {
     scr_str_release(sp->vals[i]);
   }
   sp->len = 0;
-  if (query->len > 1) sp_parse_into(sp, query->data + 1, query->len - 1);
+  if (scr_str_flat_view(query)->len > 1) sp_parse_into(sp, scr_str_flat_view(query)->data + 1, scr_str_flat_view(query)->len - 1);
 }
 
 ScrSearchParams *scr_url_search_params(ScrUrl *u) {
   if (u->sp_cache) return scr_sp_retain(u->sp_cache);
   ScrSearchParams *sp = sp_alloc();
-  if (u->query->len > 1) sp_parse_into(sp, u->query->data + 1, u->query->len - 1);
+  if (scr_str_flat_view(u->query)->len > 1) sp_parse_into(sp, scr_str_flat_view(u->query)->data + 1, scr_str_flat_view(u->query)->len - 1);
   sp->owner = scr_url_retain(u);
   u->sp_cache = sp;
   u->sp_reload = sp_reload;
@@ -411,12 +411,12 @@ void scr_sp_append(ScrSearchParams *sp, ScrStr *name, ScrStr *value) {
 /* A stored USV string against an argument, which is compared as its USV
  * conversion (same length: U+FFFD replaces each lone surrogate). */
 static bool sp_str_eq(const ScrStr *stored, const ScrStr *arg) {
-  if (stored->len != arg->len) return false;
-  if (memcmp(stored->data, arg->data, arg->len) == 0) return true;
+  if (scr_str_flat_view(stored)->len != scr_str_flat_view(arg)->len) return false;
+  if (memcmp(scr_str_flat_view(stored)->data, scr_str_flat_view(arg)->data, scr_str_flat_view(arg)->len) == 0) return true;
   if (!scr_str_has_surrogate(arg)) return false;
   char *owned;
   const char *usv = scr_str_utf8(arg, &owned);
-  bool equal = memcmp(stored->data, usv, arg->len) == 0;
+  bool equal = memcmp(scr_str_flat_view(stored)->data, usv, scr_str_flat_view(arg)->len) == 0;
   scr_str_utf8_end(owned);
   return equal;
 }

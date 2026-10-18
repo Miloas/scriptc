@@ -479,6 +479,8 @@ export interface LlvmTargetOptions {
   pointerBits?: 32 | 64;
   /** Select the WASI libc entry-point convention. */
   wasi?: boolean;
+  /** Native 8-/16-bit strings require the matching experimental runtime ABI. */
+  experimentalQuickJsStrings?: boolean;
   /** Library archive assembly may move the volatile identity getters into a
    * separate translation unit. Public/direct emission keeps them by default. */
   emitLibraryIdentity?: boolean;
@@ -775,6 +777,7 @@ export class LlEmitter {
   private readonly stackGuardTsd: "aarch64" | "x86_64" | null;
   private readonly emitLibraryIdentity: boolean;
   private readonly runtimeAbiMarker: boolean;
+  readonly quickjsStrings: boolean;
   private readonly detachedExit: boolean;
   /** Interned string literals: UTF-8 text → { symbol, byte length } —
    * first-use order, the runtime ABI’s determinism discipline. */
@@ -1256,7 +1259,8 @@ export class LlEmitter {
             : null
         : null;
     this.emitLibraryIdentity = options.emitLibraryIdentity !== false;
-    this.runtimeAbiMarker = options.runtimeAbiMarker === true;
+    this.quickjsStrings = options.experimentalQuickJsStrings === true;
+    this.runtimeAbiMarker = options.runtimeAbiMarker === true || this.quickjsStrings;
     this.detachedExit = options.detachedExit === true;
     this.rcHelpers = options.inlineRc !== undefined ? new Set() : null;
     this.rcMode = options.inlineRc;
@@ -1439,6 +1443,7 @@ export class LlEmitter {
       }
     }
     this.shapeHost = {
+      flatStringIn: (B, s) => this.flatStringIn(B, s),
       sizeType: this.sizeType,
       cycleBufOffset: this.cycleBufOffset,
       tracedShapes: this.tracedShapes,
@@ -2366,7 +2371,12 @@ export class LlEmitter {
     // write/abort declarations).
     const helpers = [
       ...this.helperDefs(),
-      ...emitArraySearchHelpers(this.arraySearchKinds, this.sizeType, (line) => this.declare(line)),
+      ...emitArraySearchHelpers(
+        this.arraySearchKinds,
+        this.sizeType,
+        (line) => this.declare(line),
+        this.quickjsStrings,
+      ),
       ...emitClassMembershipHelper(this.classMeta, this.sizeType),
       ...(this.publishWalkersCache?.defs() ?? []),
       ...this.publishedClassNamesDefs(),
@@ -2504,8 +2514,10 @@ export class LlEmitter {
       `declare void @scr_lib_init(i32, ptr)`,
       ...(this.mod.workers ? [`declare void @scr_runtime_workers_v8()`] : []),
       ...(this.stackChecks?.size ? [`declare void @scr_stack_guard_init()`] : []),
-      ...(this.runtimeAbiMarker && this.mod.lib === undefined
-        ? [`declare void @${RUNTIME_ABI_MARKER}()`]
+      ...(this.runtimeAbiMarker
+        ? [
+            `declare void @${this.quickjsStrings ? "scr_runtime_abi_v22_quickjs_strings_v1" : RUNTIME_ABI_MARKER}()`,
+          ]
         : []),
       // Overrides the runtime's weak default (scr_lib.c).
       ...(this.detachedExit && this.mod.lib === undefined
@@ -2778,7 +2790,11 @@ export class LlEmitter {
     out.push(
       `define i32 @${this.mod.workers ? "sc_context_entry" : this.wasi ? "__main_argc_argv" : "main"}(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
       `entry:`,
-      ...(this.runtimeAbiMarker ? [`  call void @${RUNTIME_ABI_MARKER}()`] : []),
+      ...(this.runtimeAbiMarker
+        ? [
+            `  call void @${this.quickjsStrings ? "scr_runtime_abi_v22_quickjs_strings_v1" : RUNTIME_ABI_MARKER}()`,
+          ]
+        : []),
       ...(this.mod.workers ? [`  call void @scr_runtime_workers_v8()`] : []),
       `  call void @scr_init()`,
       // Each context (the main thread, every worker) installs its stack
@@ -3033,6 +3049,11 @@ export class LlEmitter {
     out.push(
       `define void @${lib.initSymbol}() ${FN_ATTRS} {`,
       `entry:`,
+      ...(this.runtimeAbiMarker
+        ? [
+            `  call void @${this.quickjsStrings ? "scr_runtime_abi_v22_quickjs_strings_v1" : RUNTIME_ABI_MARKER}()`,
+          ]
+        : []),
       `  call void @scr_library_entry(i1 zeroext true, ptr ${symConst(lib.initSymbol)}) ; init always resets the result arena`,
       ...globalReleaseLines("ci"),
       ...zeroStores,
@@ -3617,28 +3638,39 @@ export class LlEmitter {
     // identity, and equality rejects different byte lengths, before any
     // runtime call (scr_str_eq/scr_str_cmp keep the complete semantics).
     if (this.decls.has(`declare zeroext i1 @scr_str_eq(ptr, ptr)`)) {
-      defs.push(
-        `define internal zeroext i1 @sc_str_eq(ptr %a, ptr %b) ${FN_ATTRS} {`,
-        `entry:`,
-        `  %same = icmp eq ptr %a, %b`,
-        `  br i1 %same, label %yes, label %lengths`,
-        `lengths:`,
-        `  %alen.p = getelementptr inbounds %ScrStr, ptr %a, i32 0, i32 1`,
-        `  %blen.p = getelementptr inbounds %ScrStr, ptr %b, i32 0, i32 1`,
-        `  %alen = load ${this.sizeType}, ptr %alen.p`,
-        `  %blen = load ${this.sizeType}, ptr %blen.p`,
-        `  %samelen = icmp eq ${this.sizeType} %alen, %blen`,
-        `  br i1 %samelen, label %bytes, label %no`,
-        `bytes:`,
-        `  %eq = call zeroext i1 @scr_str_eq(ptr %a, ptr %b)`,
-        `  ret i1 %eq`,
-        `yes:`,
-        `  ret i1 true`,
-        `no:`,
-        `  ret i1 false`,
-        `}`,
-        ``,
-      );
+      if (this.quickjsStrings) {
+        defs.push(
+          `define internal zeroext i1 @sc_str_eq(ptr %a, ptr %b) ${FN_ATTRS} {`,
+          `entry:`,
+          `  %eq = call zeroext i1 @scr_str_eq(ptr %a, ptr %b)`,
+          `  ret i1 %eq`,
+          `}`,
+          ``,
+        );
+      } else {
+        defs.push(
+          `define internal zeroext i1 @sc_str_eq(ptr %a, ptr %b) ${FN_ATTRS} {`,
+          `entry:`,
+          `  %same = icmp eq ptr %a, %b`,
+          `  br i1 %same, label %yes, label %lengths`,
+          `lengths:`,
+          `  %alen.p = getelementptr inbounds %ScrStr, ptr %a, i32 0, i32 1`,
+          `  %blen.p = getelementptr inbounds %ScrStr, ptr %b, i32 0, i32 1`,
+          `  %alen = load ${this.sizeType}, ptr %alen.p`,
+          `  %blen = load ${this.sizeType}, ptr %blen.p`,
+          `  %samelen = icmp eq ${this.sizeType} %alen, %blen`,
+          `  br i1 %samelen, label %bytes, label %no`,
+          `bytes:`,
+          `  %eq = call zeroext i1 @scr_str_eq(ptr %a, ptr %b)`,
+          `  ret i1 %eq`,
+          `yes:`,
+          `  ret i1 true`,
+          `no:`,
+          `  ret i1 false`,
+          `}`,
+          ``,
+        );
+      }
     }
     for (const [text, name] of this.literalEqualities) {
       defs.push(
@@ -3648,6 +3680,7 @@ export class LlEmitter {
           this.internLiteral(text),
           this.sizeType,
           FN_ATTRS,
+          this.quickjsStrings,
         ),
         ``,
       );
@@ -3662,6 +3695,26 @@ export class LlEmitter {
     let scanDeclared = false;
     for (const helper of STRING_READ_HELPERS) {
       if (!this.decls.has(helper.decl)) continue;
+      if (this.quickjsStrings) {
+        const length = helper.decl.includes("utf16_len");
+        const integer = helper.decl.includes("char_code_at_int");
+        const name = length
+          ? "sc_str_utf16_len"
+          : integer
+            ? "sc_str_char_code_at_int"
+            : "sc_str_char_code_at";
+        const params = length ? "ptr %s" : integer ? "ptr %s, i64 %i" : "ptr %s, double %i";
+        defs.push(
+          `define internal double @${name}(${params}) ${FN_ATTRS} {`,
+          `entry:`,
+          ...(integer ? [`  %d = sitofp i64 %i to double`] : []),
+          `  %r = call double @${length ? "scr_str_utf16_len(ptr %s)" : `scr_str_char_code_at(ptr %s, double ${integer ? "%d" : "%i"})`}`,
+          `  ret double %r`,
+          `}`,
+          ``,
+        );
+        continue;
+      }
       if (scanInline && !scanDeclared) {
         defs.push(stringScanDecl(this.sizeType), ``);
         scanDeclared = true;
@@ -3673,6 +3726,17 @@ export class LlEmitter {
     // bytes are ASCII. Callers only test the sign of the result.
     for (const fn of ["scr_str_cmp", "scr_str_cmp_u16"]) {
       if (!this.decls.has(`declare i32 @${fn}(ptr, ptr)`)) continue;
+      if (this.quickjsStrings) {
+        defs.push(
+          `define internal i32 @${fn.replace(/^scr_/, "sc_")}(ptr %a, ptr %b) ${FN_ATTRS} {`,
+          `entry:`,
+          `  %r = call i32 @${fn}(ptr %a, ptr %b)`,
+          `  ret i32 %r`,
+          `}`,
+          ``,
+        );
+        continue;
+      }
       this.declare("declare i64 @llvm.bswap.i64(i64)");
       const utf16 = fn === "scr_str_cmp_u16";
       defs.push(
@@ -4726,12 +4790,20 @@ export class LlEmitter {
 
   /** The inline equality test against one string literal (an
    * `i1 (ptr)` helper LLVM inlines at each site), by literal symbol. */
+  flatStringIn(B: BlockBuilder, value: string): string {
+    if (!this.quickjsStrings) return value;
+    this.declare("declare ptr @scr_str_utf8_view(ptr)");
+    const flat = B.tmp();
+    B.line(`${flat} = call ptr @scr_str_utf8_view(ptr ${value})`);
+    return flat;
+  }
+
   literalEquals(text: string): string {
     const literal = this.internLiteral(text);
     const name = `@sc_streq_${literal.slice("@sc_lit_".length)}`;
     if (!this.literalEqualities.has(text)) {
       this.literalEqualities.set(text, name);
-      if (Buffer.byteLength(text, "utf8") > INLINE_LITERAL_BYTES) {
+      if (this.quickjsStrings || Buffer.byteLength(text, "utf8") > INLINE_LITERAL_BYTES) {
         this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
       }
     }

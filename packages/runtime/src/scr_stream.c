@@ -1532,13 +1532,13 @@ ScrStream *scr_stream_from_dyn(ScrDyn *src, ScrDyn *opts) {
       ScrDyn *k = keys->v.arr.items[i];
       if (k->kind != SCR_DYN_STR) continue;
       ScrStr *name = k->v.str;
-      if ((name->len == 10 && memcmp(name->data, "objectMode", 10) == 0) ||
-          (name->len == 13 && memcmp(name->data, "highWaterMark", 13) == 0)) {
+      if ((scr_str_flat_view(name)->len == 10 && memcmp(scr_str_flat_view(name)->data, "objectMode", 10) == 0) ||
+          (scr_str_flat_view(name)->len == 13 && memcmp(scr_str_flat_view(name)->data, "highWaterMark", 13) == 0)) {
         continue;
       }
       char m[200];
       int n = snprintf(m, sizeof m, "the Readable.from option '%.*s' is not supported yet",
-                       (int)(name->len > 64 ? 64 : name->len), name->data);
+                       (int)(scr_str_flat_view(name)->len > 64 ? 64 : scr_str_flat_view(name)->len), scr_str_flat_view(name)->data);
       scr_dyn_release(keys);
       if (iter) scr_dyn_release(iter);
       scr_throw_error_msg(SCR_ERR_ERROR, m, (size_t)n);
@@ -1682,13 +1682,13 @@ static void scr_stream_on_listener(ScrEmitter *em, ScrStr *name) {
   ScrStream *s = (ScrStream *)em;
   ScrStreamState *st = s->st;
   if (!st || !st->has_r) return;
-  if (name->len == 4 && memcmp(name->data, "data", 4) == 0) {
+  if (scr_str_flat_view(name)->len == 4 && memcmp(scr_str_flat_view(name)->data, "data", 4) == 0) {
     st->r.readable_listening = scr_emitter_has(em, "readable");
     if (st->r.flowing != 0) {
       st->r.flowing = 1;
       scr_stream_resume_kick(s);
     }
-  } else if (name->len == 8 && memcmp(name->data, "readable", 8) == 0) {
+  } else if (scr_str_flat_view(name)->len == 8 && memcmp(scr_str_flat_view(name)->data, "readable", 8) == 0) {
     scr_stream_readable_listen(s);
   }
 }
@@ -2436,13 +2436,13 @@ static ScrStr *scr_stream_dynopt_encoding(const ScrStr *raw) {
   };
   for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
     size_t n = strlen(map[i].from);
-    if (raw->len == n && memcmp(raw->data, map[i].from, n) == 0) {
+    if (scr_str_flat_view(raw)->len == n && memcmp(scr_str_flat_view(raw)->data, map[i].from, n) == 0) {
       return scr_str_new(map[i].to, strlen(map[i].to));
     }
   }
   char msg[128];
   int len = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",
-                     (int)(raw->len < 64 ? raw->len : 64), raw->data);
+                     (int)(scr_str_flat_view(raw)->len < 64 ? scr_str_flat_view(raw)->len : 64), scr_str_flat_view(raw)->data);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)(len < 0 ? 0 : len), "ERR_UNKNOWN_ENCODING");
   return NULL;
 }
@@ -2492,8 +2492,8 @@ static bool scr_stream_parse_dyn_opts(const ScrDyn *opts, char base, ScrStreamDy
   {
     ScrDyn *v = scr_dyn_obj_get((ScrDyn *)opts, "defaultEncoding", 15);
     if (v != NULL && v->kind == SCR_DYN_STR &&
-        !(v->v.str->len == 4 && memcmp(v->v.str->data, "utf8", 4) == 0) &&
-        !(v->v.str->len == 5 && memcmp(v->v.str->data, "utf-8", 5) == 0)) {
+        !(scr_str_flat_view(v->v.str)->len == 4 && memcmp(scr_str_flat_view(v->v.str)->data, "utf8", 4) == 0) &&
+        !(scr_str_flat_view(v->v.str)->len == 5 && memcmp(scr_str_flat_view(v->v.str)->data, "utf-8", 5) == 0)) {
       static const char m[] = "the stream option 'defaultEncoding' is not supported yet (utf8, the default, is the write-side string encoding)";
       return scr_stream_dynopt_unsupported(m, sizeof m - 1);
     }
@@ -3009,10 +3009,10 @@ static void scr_pipe_on(ScrStream *s, const char *name, ScrClosure *cb /*moves*/
 }
 
 static bool scr_pipe_err_is(const ScrError *e, const char *code, const char *name) {
-  if (code && e->code && e->code->len == strlen(code) && memcmp(e->code->data, code, e->code->len) == 0)
+  if (code && e->code && scr_str_flat_view(e->code)->len == strlen(code) && memcmp(scr_str_flat_view(e->code)->data, code, scr_str_flat_view(e->code)->len) == 0)
     return true;
-  return name && e->name && e->name->len == strlen(name) &&
-         memcmp(e->name->data, name, e->name->len) == 0;
+  return name && e->name && scr_str_flat_view(e->name)->len == strlen(name) &&
+         memcmp(scr_str_flat_view(e->name)->data, name, scr_str_flat_view(e->name)->len) == 0;
 }
 
 /* process.nextTick(callback, error): caps[0] the context, caps[1] the
@@ -5288,9 +5288,9 @@ bool scr_stream_push_str(ScrStream *s, ScrStr *str) {
     /* Node: Buffer.from(chunk, state.defaultEncoding). */
     b = scr_bytes_from_str(str, enc);
   } else {
-    b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
-    memcpy(b->data, str->data, str->len);
-    if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, str->len);
+    b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(str)->len);
+    memcpy(b->data, scr_str_flat_view(str)->data, scr_str_flat_view(str)->len);
+    if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(str)->len);
   }
   scr_stream_buffer(b);
   bool ret = scr_stream_add_chunk(s, b, false);
@@ -5366,9 +5366,9 @@ void scr_stream_unshift(ScrStream *s, ScrBytes *chunk) {
 }
 
 void scr_stream_unshift_str(ScrStream *s, ScrStr *str) {
-  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
-  memcpy(b->data, str->data, str->len);
-  if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, str->len);
+  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(str)->len);
+  memcpy(b->data, scr_str_flat_view(str)->data, scr_str_flat_view(str)->len);
+  if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(str)->len);
   scr_stream_buffer(b);
   scr_stream_unshift(s, b);
   scr_bytes_release(b);
@@ -5393,20 +5393,20 @@ static void scr_stream_listener_data(ScrClosure *adapter, ScrBytes *bytes, ScrSt
 }
 
 ScrStream *scr_stream_on_dyn(ScrStream *s, ScrStr *name, ScrDyn *cb, bool once, bool prepend) {
-  if (name->len == 4 && !memcmp(name->data, "data", 4)) {
+  if (scr_str_flat_view(name)->len == 4 && !memcmp(scr_str_flat_view(name)->data, "data", 4)) {
     return (ScrStream *)scr_emitter_on_dyn((ScrEmitter *)s, name, cb,
       scr_dyn_listener_closure_fn(cb, (void *)scr_stream_listener_data),
       scr_ee_inv_fixed2, once, prepend);
   }
-  bool error = name->len == 5 && memcmp(name->data, "error", 5) == 0;
-  bool empty = (name->len == 8 && memcmp(name->data, "readable", 8) == 0) ||
-    (name->len == 3 && memcmp(name->data, "end", 3) == 0) ||
-    (name->len == 5 && memcmp(name->data, "close", 5) == 0) ||
-    (name->len == 6 && memcmp(name->data, "finish", 6) == 0) ||
-    (name->len == 5 && memcmp(name->data, "drain", 5) == 0) ||
-    (name->len == 6 && memcmp(name->data, "resume", 6) == 0) ||
-    (name->len == 5 && memcmp(name->data, "pause", 5) == 0) ||
-    (name->len == 9 && memcmp(name->data, "prefinish", 9) == 0);
+  bool error = scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "error", 5) == 0;
+  bool empty = (scr_str_flat_view(name)->len == 8 && memcmp(scr_str_flat_view(name)->data, "readable", 8) == 0) ||
+    (scr_str_flat_view(name)->len == 3 && memcmp(scr_str_flat_view(name)->data, "end", 3) == 0) ||
+    (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "close", 5) == 0) ||
+    (scr_str_flat_view(name)->len == 6 && memcmp(scr_str_flat_view(name)->data, "finish", 6) == 0) ||
+    (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "drain", 5) == 0) ||
+    (scr_str_flat_view(name)->len == 6 && memcmp(scr_str_flat_view(name)->data, "resume", 6) == 0) ||
+    (scr_str_flat_view(name)->len == 5 && memcmp(scr_str_flat_view(name)->data, "pause", 5) == 0) ||
+    (scr_str_flat_view(name)->len == 9 && memcmp(scr_str_flat_view(name)->data, "prefinish", 9) == 0);
   if (error || empty) {
     ScrClosure *adapter = error ? scr_dyn_listener_closure_fn(cb, (void *)&scr_stream_listener_error) : scr_dyn_listener_closure0(cb);
     return (ScrStream *)scr_emitter_on_dyn((ScrEmitter *)s, name, cb, adapter,
@@ -5638,9 +5638,9 @@ bool scr_stream_write_null(ScrStream *s) {
 }
 
 bool scr_stream_write_str(ScrStream *s, ScrStr *str, ScrClosure *cb) {
-  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
-  memcpy(b->data, str->data, str->len);
-  if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, str->len);
+  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(str)->len);
+  memcpy(b->data, scr_str_flat_view(str)->data, scr_str_flat_view(str)->len);
+  if (!str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(str)->len);
   scr_stream_buffer(b);
   bool ret = scr_stream_write_chunk(s, b, cb);
   scr_bytes_release(b);
@@ -5777,9 +5777,9 @@ void scr_stream_transform_done(ScrStream *s, ScrError *err /*moves*/, ScrBytes *
     if (data) {
       scr_stream_add_chunk(s, data, false);
     } else if (data_str) {
-      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)data_str->len);
-      memcpy(b->data, data_str->data, data_str->len);
-      if (!data_str->ascii) scr_wtf8_to_utf8((char *)b->data, data_str->len);
+      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(data_str)->len);
+      memcpy(b->data, scr_str_flat_view(data_str)->data, scr_str_flat_view(data_str)->len);
+      if (!data_str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(data_str)->len);
       scr_stream_buffer(b);
       scr_stream_add_chunk(s, b, false);
       scr_bytes_release(b);
@@ -5809,9 +5809,9 @@ void scr_stream_flush_done(ScrStream *s, ScrError *err /*moves*/, ScrBytes *data
     scr_stream_add_chunk(s, data, false);
     scr_bytes_release(data);
   } else if (data_str) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)data_str->len);
-    memcpy(b->data, data_str->data, data_str->len);
-    if (!data_str->ascii) scr_wtf8_to_utf8((char *)b->data, data_str->len);
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(data_str)->len);
+    memcpy(b->data, scr_str_flat_view(data_str)->data, scr_str_flat_view(data_str)->len);
+    if (!data_str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(data_str)->len);
     scr_stream_buffer(b);
     scr_stream_add_chunk(s, b, false);
     scr_bytes_release(b);
@@ -6392,7 +6392,7 @@ static ScrStream *scr_stream_view_receiver(const ScrDyn *value) {
 static ScrDyn *scr_stream_view_call(ScrClosure *cb, ScrDyn *const *args, size_t argc) {
   ScrStream *stream = scr_box_get_ref(cb->caps[0]);
   ScrStr *name = scr_box_get_ref(cb->caps[1]);
-  const char *method = name->data;
+  const char *method = scr_str_flat_view(name)->data;
   ScrDyn *result = NULL;
   ScrDyn *first = argc ? args[0] : scr_dyn_undefined();
   if (!strcmp(method, "on") || !strcmp(method, "once") || !strcmp(method, "addListener") ||

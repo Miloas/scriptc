@@ -360,7 +360,7 @@ static RlPos tty_display_pos(ScrRl *rl, const uint16_t *p, size_t n) {
     scr_str_release(raw);
     ScrStr *stripped = scr_util_strip_vt(d);
     scr_dyn_release(d);
-    u16_from_utf8(&str, stripped->data, stripped->len);
+    u16_from_utf8(&str, scr_str_flat_view(stripped)->data, scr_str_flat_view(stripped)->len);
     scr_str_release(stripped);
   } else {
     u16_set(&str, p, n);
@@ -403,7 +403,7 @@ static RlPos tty_display_pos(ScrRl *rl, const uint16_t *p, size_t n) {
 static RlPos tty_cursor_pos(ScrRl *rl) {
   ScrRlTty *t = tty_of(rl);
   U16 s = {0};
-  u16_from_utf8(&s, rl->prompt->data, rl->prompt->len);
+  u16_from_utf8(&s, scr_str_flat_view(rl->prompt)->data, scr_str_flat_view(rl->prompt)->len);
   u16_append(&s, t->line.u, t->cursor);
   RlPos pos = tty_display_pos(rl, s.u, s.n);
   u16_free(&s);
@@ -442,7 +442,7 @@ static void tty_snap(ScrRlTty *t, int dir) {
 static void tty_refresh(ScrRl *rl) {
   ScrRlTty *t = tty_of(rl);
   U16 line = {0};
-  u16_from_utf8(&line, rl->prompt->data, rl->prompt->len);
+  u16_from_utf8(&line, scr_str_flat_view(rl->prompt)->data, scr_str_flat_view(rl->prompt)->len);
   size_t prompt_n = line.n;
   u16_append(&line, t->line.u, t->line.n);
   RlPos disp = tty_display_pos(rl, line.u, line.n);
@@ -770,7 +770,7 @@ static double tty_hist_len(ScrRl *rl) { return scr_arr_len(scr_rl_history_of(rl)
 static void tty_hist_at(ScrRl *rl, double i, U16 *out) {
   out->n = 0;
   ScrStr *s = scr_arr_peek_ref(scr_rl_history_of(rl), i);
-  if (s) u16_from_utf8(out, s->data, s->len);
+  if (s) u16_from_utf8(out, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
 }
 
 /* addHistory(isMultiline, false): the line kLine hands kOnLine (+1) */
@@ -811,7 +811,7 @@ static ScrStr *tty_add_history(ScrRl *rl) {
     final = scr_str_new("", 0);
   } else if (t->multiline) {
     U16 a = {0}, b = {0};
-    u16_from_utf8(&a, top->data, top->len);
+    u16_from_utf8(&a, scr_str_flat_view(top)->data, scr_str_flat_view(top)->len);
     tty_reverse_lines(&b, a.u, a.n, '\r', '\r');
     final = u16_to_str(b.u, b.n);
     u16_free(&a);
@@ -971,7 +971,7 @@ static void strs_free(RlStrs *s) {
 static void tty_dyn_to_u16(const ScrDyn *d, U16 *out) {
   out->n = 0;
   ScrStr *s = d->kind == SCR_DYN_STR ? scr_str_retain(d->v.str) : scr_dyn_string_coerce(d);
-  u16_from_utf8(out, s->data, s->len);
+  u16_from_utf8(out, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
   scr_str_release(s);
 }
 
@@ -987,7 +987,7 @@ static double tty_string_width(const U16 *s) {
     scr_str_release(raw);
     ScrStr *stripped = scr_util_strip_vt(d);
     scr_dyn_release(d);
-    u16_from_utf8(&str, stripped->data, stripped->len);
+    u16_from_utf8(&str, scr_str_flat_view(stripped)->data, scr_str_flat_view(stripped)->len);
     scr_str_release(stripped);
   } else {
     u16_set(&str, s->u, s->n);
@@ -2006,7 +2006,7 @@ static void hub_on_data(RlKeyHub *h, const unsigned char *p, size_t n, ScrStr *s
     return;
   }
   if (str) {
-    hub_feed_text(h, str->data, str->len);
+    hub_feed_text(h, scr_str_flat_view(str)->data, scr_str_flat_view(str)->len);
     return;
   }
   size_t total = h->n_held + n;
@@ -2019,7 +2019,7 @@ static void hub_on_data(RlKeyHub *h, const unsigned char *p, size_t n, ScrStr *s
   memcpy(h->held, all + total - tail, tail);
   ScrStr *text = scr_str_from_utf8_lossy(all, total - tail);
   free(all);
-  hub_feed_text(h, text->data, text->len);
+  hub_feed_text(h, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
   scr_str_release(text);
 }
 
@@ -2092,7 +2092,7 @@ static void hub_data_on(RlKeyHub *h) {
 static void hub_stream_new_listener(ScrClosure *cb, void *name) {
   RlKeyHub *h = hub_by_id(scr_box_get_f64(cb->caps[0]));
   ScrStr *ev = name;
-  if (!h || !ev || ev->len != 8 || memcmp(ev->data, "keypress", 8) != 0) return;
+  if (!h || !ev || scr_str_flat_view(ev)->len != 8 || memcmp(scr_str_flat_view(ev)->data, "keypress", 8) != 0) return;
   ScrClosure *self = h->on_new;
   h->on_new = NULL;
   hub_data_on(h);
@@ -2150,15 +2150,15 @@ static void hub_rl_listener(ScrClosure *cb, void *str, void *key) {
   ScrDyn *sd = str, *kd = key;
   U16 s = {0};
   bool has_s = sd && sd->kind == SCR_DYN_STR;
-  if (has_s) u16_from_utf8(&s, sd->v.str->data, sd->v.str->len);
+  if (has_s) u16_from_utf8(&s, scr_str_flat_view(sd->v.str)->data, scr_str_flat_view(sd->v.str)->len);
   RlKey k = {0};
   char *nm = NULL;
   ScrDyn *v = kd ? scr_dyn_obj_get(kd, "name", 4) : NULL;
   if (v && v->kind == SCR_DYN_STR) {
-    nm = malloc(v->v.str->len + 1);
+    nm = malloc(scr_str_flat_view(v->v.str)->len + 1);
     if (!nm) tty_oom();
-    memcpy(nm, v->v.str->data, v->v.str->len);
-    nm[v->v.str->len] = '\0';
+    memcpy(nm, scr_str_flat_view(v->v.str)->data, scr_str_flat_view(v->v.str)->len);
+    nm[scr_str_flat_view(v->v.str)->len] = '\0';
     k.name = nm;
   }
   v = kd ? scr_dyn_obj_get(kd, "ctrl", 4) : NULL;
@@ -2170,7 +2170,7 @@ static void hub_rl_listener(ScrClosure *cb, void *str, void *key) {
   v = kd ? scr_dyn_obj_get(kd, "sequence", 8) : NULL;
   if (v && v->kind == SCR_DYN_STR) {
     k.has_sequence = true;
-    u16_from_utf8(&k.sequence, v->v.str->data, v->v.str->len);
+    u16_from_utf8(&k.sequence, scr_str_flat_view(v->v.str)->data, scr_str_flat_view(v->v.str)->len);
   }
   tty_keypress(rl, has_s ? &s : NULL, &k);
   u16_free(&k.sequence);
@@ -2252,7 +2252,7 @@ static void tty_prompt(ScrRl *rl, bool preserve) {
   ScrStr *name = scr_str_new("TERM", 4);
   ScrStr *term = scr_env_get(name);
   scr_str_release(name);
-  bool dumb = term && term->len == 4 && memcmp(term->data, "dumb", 4) == 0;
+  bool dumb = term && scr_str_flat_view(term)->len == 4 && memcmp(scr_str_flat_view(term)->data, "dumb", 4) == 0;
   if (term) scr_str_release(term);
   if (dumb) {
     scr_rl_write_out(rl, rl->prompt);
@@ -2265,7 +2265,7 @@ static void tty_prompt(ScrRl *rl, bool preserve) {
 /* write(d): kTtyWrite(d) with no key */
 static void tty_write_op(ScrRl *rl, ScrStr *data) {
   U16 s = {0};
-  u16_from_utf8(&s, data->data, data->len);
+  u16_from_utf8(&s, scr_str_flat_view(data)->data, scr_str_flat_view(data)->len);
   if (rl->tty->dumb) tty_write_dumb(rl, &s, NULL);
   else tty_write_key(rl, &s, NULL);
   u16_free(&s);
@@ -2305,14 +2305,14 @@ static double tty_cursor_op(ScrRl *rl) { return (double)rl->tty->cursor; }
 static void tty_write_key_op(ScrRl *rl, ScrStr *data, bool has_key, ScrStr *name, bool ctrl,
                              bool meta, bool shift) {
   U16 s = {0};
-  if (data) u16_from_utf8(&s, data->data, data->len);
+  if (data) u16_from_utf8(&s, scr_str_flat_view(data)->data, scr_str_flat_view(data)->len);
   RlKey key = {0};
   char *nm = NULL;
   if (name) {
-    nm = malloc(name->len + 1);
+    nm = malloc(scr_str_flat_view(name)->len + 1);
     if (!nm) tty_oom();
-    memcpy(nm, name->data, name->len);
-    nm[name->len] = '\0';
+    memcpy(nm, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+    nm[scr_str_flat_view(name)->len] = '\0';
     key.name = nm;
   }
   key.ctrl = ctrl;
@@ -2337,7 +2337,7 @@ double scr_rl_cursor_pos(double id, double which) {
     probe.columns = INFINITY;
     rl->tty = &probe;
     U16 s = {0};
-    u16_from_utf8(&s, rl->prompt->data, rl->prompt->len);
+    u16_from_utf8(&s, scr_str_flat_view(rl->prompt)->data, scr_str_flat_view(rl->prompt)->len);
     pos = tty_display_pos(rl, s.u, s.n);
     u16_free(&s);
     rl->tty = NULL;
@@ -2387,7 +2387,7 @@ void scr_rl_terminal(double id, double mode, bool on, ScrDyn *completer, bool pr
     ScrStr *name = scr_str_new("TERM", 4);
     ScrStr *term = scr_env_get(name);
     scr_str_release(name);
-    t->dumb = term && term->len == 4 && memcmp(term->data, "dumb", 4) == 0;
+    t->dumb = term && scr_str_flat_view(term)->len == 4 && memcmp(scr_str_flat_view(term)->data, "dumb", 4) == 0;
     if (term) scr_str_release(term);
   }
   t->raw_stdin = rl->stdin_in && scr_process_is_tty(0);

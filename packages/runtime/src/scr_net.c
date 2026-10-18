@@ -396,7 +396,7 @@ static void scr_net_ls_remove_fn(ScrNetLs *l, ScrClosure *root) {
 void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag tag) {
   if (l->n == 0) {
     fflush(stdout);
-    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", msg->data);
+    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", scr_str_flat_view(msg)->data);
     _Exit(1);
   }
   ScrNetL *snap;
@@ -1672,7 +1672,7 @@ void scr_net_listen(ScrNetServer *s, double port, ScrClosure *cb /*moves, nullab
 static void scr_net_listen_opts_impl(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
                                      bool ipv6_only, bool reuse_port,
                                      ScrClosure *cb /*moves, nullable*/) {
-  if (host == NULL || host->len == 0) {
+  if (host == NULL || scr_str_flat_view(host)->len == 0) {
     scr_net_listen_any(s, port, reuse_port, cb);
     return;
   }
@@ -1684,7 +1684,7 @@ static void scr_net_listen_opts_impl(ScrNetServer *s, double port, ScrStr *host 
   }
   int p = (int)port;
   char h[64];
-  snprintf(h, sizeof h, "%.*s", (int)(host->len < 63 ? host->len : 63), host->data);
+  snprintf(h, sizeof h, "%.*s", (int)(scr_str_flat_view(host)->len < 63 ? scr_str_flat_view(host)->len : 63), scr_str_flat_view(host)->data);
   if (strcmp(h, "localhost") == 0) snprintf(h, sizeof h, "127.0.0.1");
   struct sockaddr_in a4;
   struct sockaddr_in6 a6;
@@ -2175,10 +2175,10 @@ static void scr_net_server_accept(ScrNetServer *srv) {
  * failure is the async 'error' event, like Node. */
 
 ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
-  if (host->len == 9 && memcmp(host->data, "localhost", 9) == 0) return scr_str_retain(host);
+  if (scr_str_flat_view(host)->len == 9 && memcmp(scr_str_flat_view(host)->data, "localhost", 9) == 0) return scr_str_retain(host);
   struct in_addr a4;
   struct in6_addr a6;
-  if (inet_pton(AF_INET, host->data, &a4) == 1 || inet_pton(AF_INET6, host->data, &a6) == 1) {
+  if (inet_pton(AF_INET, scr_str_flat_view(host)->data, &a4) == 1 || inet_pton(AF_INET6, scr_str_flat_view(host)->data, &a6) == 1) {
     return scr_str_retain(host);
   }
   if (!scr_net_poller_init()) return scr_str_retain(host); /* WSAStartup on win32 */
@@ -2186,7 +2186,7 @@ ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
   memset(&hints, 0, sizeof hints);
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo *res = NULL;
-  if (getaddrinfo(host->data, NULL, &hints, &res) != 0 || res == NULL) {
+  if (getaddrinfo(scr_str_flat_view(host)->data, NULL, &hints, &res) != 0 || res == NULL) {
     if (res) freeaddrinfo(res);
     return scr_str_retain(host);
   }
@@ -2206,7 +2206,7 @@ ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
  * is pinned to 127.0.0.1 (the documented divergence from Node's family
  * autoselect), and any other name is resolved when the dial starts. */
 static void scr_net_sock_set_peer(ScrNetSocket *s, ScrStr *host /*borrowed, nullable*/) {
-  const char *h = host && host->len > 0 ? host->data : "localhost";
+  const char *h = host && scr_str_flat_view(host)->len > 0 ? scr_str_flat_view(host)->data : "localhost";
   if (strcmp(h, "localhost") == 0) h = "127.0.0.1";
   snprintf(s->peer_ip, sizeof s->peer_ip, "%s", h);
   struct in_addr a4;
@@ -2235,7 +2235,7 @@ static void scr_net_sock_dial_host(ScrNetSocket *s) {
   hints.ai_flags = AI_ADDRCONFIG;
 #endif
   struct addrinfo *res = NULL;
-  int rc = getaddrinfo(host->data, NULL, &hints, &res);
+  int rc = getaddrinfo(scr_str_flat_view(host)->data, NULL, &hints, &res);
   size_t n = 0;
   for (struct addrinfo *ai = rc == 0 ? res : NULL; ai != NULL; ai = ai->ai_next) n++;
   ScrStr **ips = n > 0 ? calloc(n, sizeof *ips) : NULL;
@@ -2262,7 +2262,7 @@ static void scr_net_sock_dial_host(ScrNetSocket *s) {
     size_t len = strlen(ip);
     bool seen = false;
     for (size_t i = 0; i < count[f] && !seen; i++)
-      seen = fam[f][i]->len == len && memcmp(fam[f][i]->data, ip, len) == 0;
+      seen = scr_str_flat_view(fam[f][i])->len == len && memcmp(scr_str_flat_view(fam[f][i])->data, ip, len) == 0;
     if (!seen) fam[f][count[f]++] = scr_str_new(ip, len);
   }
   if (res) freeaddrinfo(res);
@@ -2282,7 +2282,7 @@ static void scr_net_sock_dial_host(ScrNetSocket *s) {
     const char *code = notfound ? "ENOTFOUND" : rc == EAI_AGAIN ? "EAI_AGAIN" : "EAI_FAIL";
     char msg[320];
     snprintf(msg, sizeof msg, "getaddrinfo %s %.*s", code,
-             (int)(host->len < 255 ? host->len : 255), host->data);
+             (int)(scr_str_flat_view(host)->len < 255 ? scr_str_flat_view(host)->len : 255), scr_str_flat_view(host)->data);
     free(ips);
     scr_str_release(host);
     s->pending_err = scr_str_new(msg, strlen(msg));
@@ -2370,7 +2370,7 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
  * a host with a null byte throws ERR_INVALID_ARG_VALUE before any lookup.
  * False with the exception pending. */
 bool scr_net_host_chk(const ScrStr *host /*borrowed, nullable*/) {
-  if (host == NULL || memchr(host->data, '\0', host->len) == NULL) return true;
+  if (host == NULL || memchr(scr_str_flat_view(host)->data, '\0', scr_str_flat_view(host)->len) == NULL) return true;
   ScrStr *shown = scr_str_inspect_quoted(host, true);
   ScrJsonBuf msg;
   scr_jb_init(&msg);
@@ -2378,7 +2378,7 @@ bool scr_net_host_chk(const ScrStr *host /*borrowed, nullable*/) {
   scr_jb_put_str(&msg, shown);
   scr_str_release(shown);
   ScrStr *text = scr_jb_finish(&msg);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, text->data, text->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(text);
   return false;
 }
@@ -2456,7 +2456,7 @@ static bool scr_net_dyn_truthy(const ScrDyn *v) {
   case SCR_DYN_NULL: return false;
   case SCR_DYN_BOOL: return v->v.b;
   case SCR_DYN_NUM: return v->v.num == v->v.num && v->v.num != 0;
-  case SCR_DYN_STR: return v->v.str->len > 0;
+  case SCR_DYN_STR: return scr_str_flat_view(v->v.str)->len > 0;
   default: return true;
   }
 }
@@ -2492,7 +2492,7 @@ void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence) {
       ScrStr *ps = scr_str_retain(port->v.str);
       double n = scr_string_to_number(ps);
       scr_str_release(ps);
-      ok = n == n && trunc(n) == n && n >= 0 && n < 65536 && port->v.str->len > 0;
+      ok = n == n && trunc(n) == n && n >= 0 && n < 65536 && scr_str_flat_view(port->v.str)->len > 0;
     }
     if (!ok) {
       char detail[64], msg[160];
@@ -2570,7 +2570,7 @@ void scr_net_sock_dial_start(ScrNetSocket *s) {
  * closes any fd, and answers false without emitting. */
 static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
   char h[64];
-  snprintf(h, sizeof h, "%.*s", (int)(ip->len < 63 ? ip->len : 63), ip->data);
+  snprintf(h, sizeof h, "%.*s", (int)(scr_str_flat_view(ip)->len < 63 ? scr_str_flat_view(ip)->len : 63), scr_str_flat_view(ip)->data);
   snprintf(s->peer_ip, sizeof s->peer_ip, "%s", h);
   struct sockaddr_in a4;
   struct sockaddr_in6 a6;
@@ -2646,7 +2646,7 @@ ScrNetSocket *scr_net_connect_lookup(double port, ScrStr *host /*borrowed*/,
   ScrNetSocket *s = scr_net_sock_new();
   s->peer_port = (int)port;
   snprintf(s->peer_ip, sizeof s->peer_ip, "%.*s",
-           (int)(host->len < 63 ? host->len : 63), host->data);
+           (int)(scr_str_flat_view(host)->len < 63 ? scr_str_flat_view(host)->len : 63), scr_str_flat_view(host)->data);
   if (!scr_net_poller_init()) {
     fputs("scriptc: event poller init failed\n", stderr);
     abort();
@@ -2684,7 +2684,7 @@ void scr_net_lookup_answer(ScrClosure *self, bool has_err, ScrStr *msg /*borrowe
   if (has_err || n == 0) {
     /* lookup failure: the deferred 'error' (Node defers these too); an
      * EMPTY answer wears getaddrinfo's shape */
-    if (msg != NULL && msg->len > 0) {
+    if (msg != NULL && scr_str_flat_view(msg)->len > 0) {
       scr_str_release(s->pending_err);
       s->pending_err = scr_str_retain(msg);
     } else if (s->pending_err == NULL) {
@@ -2712,7 +2712,7 @@ void scr_net_lookup_answer(ScrClosure *self, bool has_err, ScrStr *msg /*borrowe
 void scr_net_sock_write_str(ScrNetSocket *s, ScrStr *data /*borrowed*/) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_net_sock_write_raw(s, bytes, data->len);
+  scr_net_sock_write_raw(s, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 
@@ -3045,9 +3045,9 @@ static void scr_net_addr_install(void);
  * address keeps out of its text, as uv_ip6_name prints it. */
 static bool scr_net_ip_parse(const ScrStr *text, int family, ScrNetIp *out) {
   char buf[INET6_ADDRSTRLEN + 64];
-  if (text->len >= sizeof buf || memchr(text->data, '\0', text->len) != NULL) return false;
-  memcpy(buf, text->data, text->len);
-  buf[text->len] = '\0';
+  if (scr_str_flat_view(text)->len >= sizeof buf || memchr(scr_str_flat_view(text)->data, '\0', scr_str_flat_view(text)->len) != NULL) return false;
+  memcpy(buf, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
+  buf[scr_str_flat_view(text)->len] = '\0';
   memset(out, 0, sizeof *out);
   out->family = family;
   if (family == 4) return inet_pton(AF_INET, buf, out->b) == 1;
@@ -3149,15 +3149,15 @@ static ScrDyn *scr_net_sockaddr_from_options(const ScrDyn *options) {
   if (port != NULL && port->kind == SCR_DYN_UNDEF) port = NULL;
   if (flowlabel != NULL && flowlabel->kind == SCR_DYN_UNDEF) flowlabel = NULL;
   bool raw_ipv4 = family == NULL ||
-                  (family->kind == SCR_DYN_STR && family->v.str->len == 4 &&
-                   memcmp(family->v.str->data, "ipv4", 4) == 0);
+                  (family->kind == SCR_DYN_STR && scr_str_flat_view(family->v.str)->len == 4 &&
+                   memcmp(scr_str_flat_view(family->v.str)->data, "ipv4", 4) == 0);
   int fam = 0;
   if (family == NULL) {
     fam = 4;
-  } else if (family->kind == SCR_DYN_STR && family->v.str->len == 4) {
+  } else if (family->kind == SCR_DYN_STR && scr_str_flat_view(family->v.str)->len == 4) {
     char lower[4];
     for (size_t i = 0; i < 4; i++) {
-      unsigned char c = (unsigned char)family->v.str->data[i];
+      unsigned char c = (unsigned char)scr_str_flat_view(family->v.str)->data[i];
       lower[i] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
     }
     if (memcmp(lower, "ipv4", 4) == 0) fam = 4;
@@ -3180,7 +3180,7 @@ static ScrDyn *scr_net_sockaddr_from_options(const ScrDyn *options) {
     } else if (port->kind == SCR_DYN_STR) {
       ScrStr *ps = scr_str_retain(port->v.str);
       ScrStr *trimmed = scr_str_trim(ps);
-      ok = trimmed->len > 0;
+      ok = scr_str_flat_view(trimmed)->len > 0;
       scr_str_release(trimmed);
       port_num = scr_string_to_number(ps);
       scr_str_release(ps);
@@ -3253,10 +3253,10 @@ ScrDyn *scr_net_socket_address_parse(const ScrDyn *input) {
     ScrUrl *url = scr_url_new(url_text);
     ScrStr *host = scr_url_hostname(url);
     ScrStr *port = scr_url_port(url);
-    double port_num = port->len > 0 ? scr_string_to_number(port) : 0;
+    double port_num = scr_str_flat_view(port)->len > 0 ? scr_string_to_number(port) : 0;
     ScrDyn *options = scr_dyn_new_obj();
-    bool v6 = host->len >= 2 && host->data[0] == '[' && host->data[host->len - 1] == ']';
-    ScrStr *addr = v6 ? scr_str_new(host->data + 1, host->len - 2) : scr_str_retain(host);
+    bool v6 = scr_str_flat_view(host)->len >= 2 && scr_str_flat_view(host)->data[0] == '[' && scr_str_flat_view(host)->data[scr_str_flat_view(host)->len - 1] == ']';
+    ScrStr *addr = v6 ? scr_str_new(scr_str_flat_view(host)->data + 1, scr_str_flat_view(host)->len - 2) : scr_str_retain(host);
     scr_dyn_obj_set(options, "address", 7, scr_dyn_new_str(addr));
     scr_str_release(addr);
     scr_dyn_obj_set(options, "port", 4, scr_dyn_new_num((double)(int32_t)(uint32_t)port_num));
@@ -3667,19 +3667,19 @@ static ScrDyn *scr_net_blocklist_check(const ScrNetBlockList *l, ScrDyn *const *
     return NULL;
   }
   bool v4 = family == NULL;
-  if (family != NULL && family->v.str->len == 4) {
+  if (family != NULL && scr_str_flat_view(family->v.str)->len == 4) {
     char lower[4];
     for (size_t i = 0; i < 4; i++) {
-      unsigned char c = (unsigned char)family->v.str->data[i];
+      unsigned char c = (unsigned char)scr_str_flat_view(family->v.str)->data[i];
       lower[i] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
     }
     v4 = memcmp(lower, "ipv4", 4) == 0;
   }
   char buf[INET6_ADDRSTRLEN + 8];
   const ScrStr *text = v->v.str;
-  if (text->len >= sizeof buf || memchr(text->data, '\0', text->len) != NULL) return scr_dyn_new_bool(false);
-  memcpy(buf, text->data, text->len);
-  buf[text->len] = '\0';
+  if (scr_str_flat_view(text)->len >= sizeof buf || memchr(scr_str_flat_view(text)->data, '\0', scr_str_flat_view(text)->len) != NULL) return scr_dyn_new_bool(false);
+  memcpy(buf, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
+  buf[scr_str_flat_view(text)->len] = '\0';
   ScrNetIp ip;
   memset(&ip, 0, sizeof ip);
   ip.family = v4 ? 4 : 6;
@@ -3738,19 +3738,19 @@ static bool scr_net_parse_cidr(const ScrDyn *cidr, ScrDyn **address, double *pre
     return false;
   }
   const ScrStr *text = cidr->v.str;
-  size_t slash = text->len;
-  for (size_t i = text->len; i > 0; i--) {
-    if (text->data[i - 1] == '/') {
+  size_t slash = scr_str_flat_view(text)->len;
+  for (size_t i = scr_str_flat_view(text)->len; i > 0; i--) {
+    if (scr_str_flat_view(text)->data[i - 1] == '/') {
       slash = i - 1;
       break;
     }
   }
-  if (slash == text->len) {
+  if (slash == scr_str_flat_view(text)->len) {
     scr_dyn_arg_value_fail("cidr", "must contain a prefix length (e.g. \"10.0.0.0/8\")", cidr);
     return false;
   }
-  const char *digits = text->data + slash + 1;
-  size_t ndigits = text->len - slash - 1;
+  const char *digits = scr_str_flat_view(text)->data + slash + 1;
+  size_t ndigits = scr_str_flat_view(text)->len - slash - 1;
   /* NumberParseInt(prefixStr, 10) and `${prefix}` === prefixStr: an
    * optional '-' and decimal digits with no leading zero (except "0") */
   bool neg = ndigits > 0 && digits[0] == '-';
@@ -3766,8 +3766,8 @@ static bool scr_net_parse_cidr(const ScrDyn *cidr, ScrDyn **address, double *pre
   double value = 0;
   for (size_t i = start; i < ndigits; i++) value = value * 10 + (digits[i] - '0');
   *prefix = neg ? -value : value;
-  ScrStr *addr = scr_str_new(text->data, slash);
-  *family = memchr(addr->data, ':', addr->len) != NULL ? "ipv6" : "ipv4";
+  ScrStr *addr = scr_str_new(scr_str_flat_view(text)->data, slash);
+  *family = memchr(scr_str_flat_view(addr)->data, ':', scr_str_flat_view(addr)->len) != NULL ? "ipv6" : "ipv4";
   *address = scr_dyn_new_str(addr);
   scr_str_release(addr);
   return true;
@@ -3910,8 +3910,8 @@ typedef struct {
 
 static bool scr_net_match_rule(const ScrStr *item, const char *lit, bool v6, char tail, size_t tail_max,
                                ScrNetCapture *cap) {
-  const char *s = item->data;
-  size_t n = item->len, m = strlen(lit);
+  const char *s = scr_str_flat_view(item)->data;
+  size_t n = scr_str_flat_view(item)->len, m = strlen(lit);
   for (size_t at = 0; at + m <= n; at++) {
     if (!scr_net_lit_at(s + at, n - at, lit, v6)) continue;
     size_t i = at + m;
@@ -3936,8 +3936,8 @@ static bool scr_net_match_rule(const ScrStr *item, const char *lit, bool v6, cha
 
 static bool scr_net_str_has(const ScrStr *s, const char *needle) {
   size_t m = strlen(needle);
-  for (size_t i = 0; i + m <= s->len; i++)
-    if (memcmp(s->data + i, needle, m) == 0) return true;
+  for (size_t i = 0; i + m <= scr_str_flat_view(s)->len; i++)
+    if (memcmp(scr_str_flat_view(s)->data + i, needle, m) == 0) return true;
   return false;
 }
 
@@ -4211,7 +4211,7 @@ static ScrStr *scr_net_ip_input(const ScrDyn *input) {
 double scr_net_is_ip(const ScrDyn *input) {
   ScrStr *t = scr_net_ip_input(input);
   if (!t) return 0;
-  double r = scr_net_ipv4_text(t->data, t->len) ? 4 : scr_net_ipv6_text(t->data, t->len) ? 6 : 0;
+  double r = scr_net_ipv4_text(scr_str_flat_view(t)->data, scr_str_flat_view(t)->len) ? 4 : scr_net_ipv6_text(scr_str_flat_view(t)->data, scr_str_flat_view(t)->len) ? 6 : 0;
   scr_str_release(t);
   return r;
 }
@@ -4335,15 +4335,15 @@ ScrNetServer *scr_net_sock_server(ScrNetSocket *s) { return s->server; }
  * throw the 'not supported yet' Error, unknown names throw
  * ERR_UNKNOWN_ENCODING). */
 void scr_net_sock_set_encoding(ScrNetSocket *s, ScrStr *enc /*borrowed*/) {
-  if ((enc->len == 4 && memcmp(enc->data, "utf8", 4) == 0) ||
-      (enc->len == 5 && memcmp(enc->data, "utf-8", 5) == 0)) {
+  if ((scr_str_flat_view(enc)->len == 4 && memcmp(scr_str_flat_view(enc)->data, "utf8", 4) == 0) ||
+      (scr_str_flat_view(enc)->len == 5 && memcmp(scr_str_flat_view(enc)->data, "utf-8", 5) == 0)) {
     s->enc_utf8 = true;
     return;
   }
   static const char *const known[] = { "ascii", "latin1", "binary", "base64",
     "base64url", "hex", "ucs2", "ucs-2", "utf16le", "utf-16le", NULL };
   for (size_t i = 0; known[i]; i++) {
-    if (enc->len == strlen(known[i]) && memcmp(enc->data, known[i], enc->len) == 0) {
+    if (scr_str_flat_view(enc)->len == strlen(known[i]) && memcmp(scr_str_flat_view(enc)->data, known[i], scr_str_flat_view(enc)->len) == 0) {
       char msg[128];
       int n = snprintf(msg, sizeof msg, "setEncoding('%s') is not supported yet (only 'utf8' here)",
                        known[i]);
@@ -4353,7 +4353,7 @@ void scr_net_sock_set_encoding(ScrNetSocket *s, ScrStr *enc /*borrowed*/) {
   }
   char msg[128];
   int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",
-                   (int)(enc->len < 64 ? enc->len : 64), enc->data);
+                   (int)(scr_str_flat_view(enc)->len < 64 ? scr_str_flat_view(enc)->len : 64), scr_str_flat_view(enc)->data);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_UNKNOWN_ENCODING");
 }
 
@@ -5090,8 +5090,8 @@ void scr_net_set_dynh_tls(const ScrNetDynhTlsHooks *hooks) { scr_net_dynh_tls = 
 
 static bool scr_net_dynh_name_is(const ScrDyn *name, const char *lit) {
   size_t n = strlen(lit);
-  return name->kind == SCR_DYN_STR && name->v.str->len == n &&
-         memcmp(name->v.str->data, lit, n) == 0;
+  return name->kind == SCR_DYN_STR && scr_str_flat_view(name->v.str)->len == n &&
+         memcmp(scr_str_flat_view(name->v.str)->data, lit, n) == 0;
 }
 
 static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *method,
@@ -5126,14 +5126,14 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
       /* This surface never backpressures (write answers true) — an
        * accepted, never-fired registration is the consistent answer. */
     } else if (scr_net_dynh_tls != NULL && name->kind == SCR_DYN_STR &&
-               scr_net_dynh_tls->on(s, name->v.str->data, cb, once)) {
+               scr_net_dynh_tls->on(s, scr_str_flat_view(name->v.str)->data, cb, once)) {
       /* a TLS event name ('secureConnect'), handled by the TLS unit */
     } else {
       ScrJsonBuf b;
       scr_jb_init(&b);
       scr_jb_puts(&b, "listening for '");
       if (name->kind == SCR_DYN_STR) {
-        scr_jb_write(&b, name->v.str->data, name->v.str->len);
+        scr_jb_write(&b, scr_str_flat_view(name->v.str)->data, scr_str_flat_view(name->v.str)->len);
       }
       scr_jb_puts(&b, "' on a dynamic Socket is not supported yet");
       scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
@@ -5453,14 +5453,14 @@ static ScrDyn *scr_net_dynh_srv_invoke(void *h, ScrDyn *self, const char *method
       scr_net_server_on_connection(s, scr_dyn_listener_closure_fn(cb, (void *)&scr_net_dynh_fire_conn),
                                    (ScrNetConnFn)&scr_net_dynh_fire_conn, once);
     } else if (name->kind == SCR_DYN_STR && scr_net_dynh_http_on &&
-               scr_net_dynh_http_on(s, name->v.str->data, cb, once)) {
+               scr_net_dynh_http_on(s, scr_str_flat_view(name->v.str)->data, cb, once)) {
       /* the http layer accepted the event ('request') */
     } else {
       ScrJsonBuf b;
       scr_jb_init(&b);
       scr_jb_puts(&b, "listening for '");
       if (name->kind == SCR_DYN_STR) {
-        scr_jb_write(&b, name->v.str->data, name->v.str->len);
+        scr_jb_write(&b, scr_str_flat_view(name->v.str)->data, scr_str_flat_view(name->v.str)->len);
       }
       scr_jb_puts(&b, "' on a dynamic Server is not supported yet");
       scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
@@ -5477,10 +5477,10 @@ static ScrDyn *scr_net_dynh_srv_invoke(void *h, ScrDyn *self, const char *method
     const ScrDyn *cb = NULL;
     size_t i = 0;
     if (i < argc && args[i]->kind == SCR_DYN_NUM) { port = args[i]->v.num; i++; }
-    else if (i < argc && args[i]->kind == SCR_DYN_STR && args[i]->v.str->len > 0 &&
-             args[i]->v.str->data[0] >= '0' && args[i]->v.str->data[0] <= '9') {
+    else if (i < argc && args[i]->kind == SCR_DYN_STR && scr_str_flat_view(args[i]->v.str)->len > 0 &&
+             scr_str_flat_view(args[i]->v.str)->data[0] >= '0' && scr_str_flat_view(args[i]->v.str)->data[0] <= '9') {
       /* Node coerces a numeric port string */
-      port = strtod(args[i]->v.str->data, NULL);
+      port = strtod(scr_str_flat_view(args[i]->v.str)->data, NULL);
       i++;
     } else if (i < argc && args[i]->kind == SCR_DYN_OBJ) {
       scr_net_dynh_srv_unsupported("listen", "the options-object form on a dynamic value is not modeled (use listen(port[, host][, cb]))");

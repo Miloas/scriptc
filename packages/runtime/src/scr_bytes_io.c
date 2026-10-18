@@ -31,7 +31,7 @@ static void scr_bytes_io_oom(void) {
 }
 
 static bool scr_fs_read_encoding_valid(ScrStr *encoding) {
-  if (encoding->len == 0 || scr_bytes_is_encoding(encoding)) return true;
+  if (scr_str_flat_view(encoding)->len == 0 || scr_bytes_is_encoding(encoding)) return true;
   ScrDyn *value = scr_dyn_new_str(encoding);
   scr_dyn_arg_value_fail("encoding", "is invalid encoding", value);
   scr_dyn_release(value);
@@ -41,7 +41,7 @@ static bool scr_fs_read_encoding_valid(ScrStr *encoding) {
 static ScrStr *scr_fs_decode_read(ScrBytes *bytes, ScrStr *encoding) {
   if (!bytes) return NULL;
   ScrStr *text;
-  if (encoding->len == 0) {
+  if (scr_str_flat_view(encoding)->len == 0) {
     ScrStr *utf8 = scr_str_new("utf8", 4);
     text = scr_bytes_to_str(bytes, utf8);
     scr_str_release(utf8);
@@ -56,7 +56,7 @@ static ScrStr *scr_fs_decode_read(ScrBytes *bytes, ScrStr *encoding) {
  * intermediate Buffer: the file is read into string storage and decoded in
  * place, with the same errors and decode as the Buffer path. */
 static bool scr_fs_read_utf8(ScrStr *encoding) {
-  return encoding->len == 0 || scr_bytes_encoding_is_utf8(encoding);
+  return scr_str_flat_view(encoding)->len == 0 || scr_bytes_encoding_is_utf8(encoding);
 }
 
 ScrStr *scr_fs_read_file_encoded(ScrStr *path, ScrStr *encoding) {
@@ -88,7 +88,7 @@ ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc) {
     return scr_fs_read_file_sync_dyn(path, ev ? ev : scr_dyn_undefined());
   }
   if (enc->kind == SCR_DYN_UNDEF || enc->kind == SCR_DYN_NULL ||
-      (enc->kind == SCR_DYN_STR && enc->v.str->len == 0)) {
+      (enc->kind == SCR_DYN_STR && scr_str_flat_view(enc->v.str)->len == 0)) {
     ScrBytes *b = scr_fs_read_file_bytes(path);
     if (!b) return NULL;
     ScrDyn *d = scr_dyn_new_buffer(b);
@@ -123,7 +123,7 @@ ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc) {
 static void scr_fs_write_bytes_common(ScrStr *path, const ScrBytes *data, const char *mode) {
   if (!scr_fs_path_ok(path, "path")) return;
   SCR_BYTES_SNAPSHOT(data);
-  FILE *f = fopen(path->data, mode);
+  FILE *f = fopen(scr_str_flat_view(path)->data, mode);
   if (!f) {
     scr_fs_throw(errno, "open", path);
     return;
@@ -285,13 +285,13 @@ static void scr_fs_flag_invalid(const char *f) {
 /* open's flags check, which Node runs before its callback check. Numeric
  * flags keep their open-time refusal. */
 static bool scr_fs_cb_open_flags(const ScrDyn *flag) {
-  if (flag->kind != SCR_DYN_STR || scr_fs_flag_bits(flag->v.str->data) >= 0) return true;
-  scr_fs_flag_invalid(flag->v.str->data);
+  if (flag->kind != SCR_DYN_STR || scr_fs_flag_bits(scr_str_flat_view(flag->v.str)->data) >= 0) return true;
+  scr_fs_flag_invalid(scr_str_flat_view(flag->v.str)->data);
   return false;
 }
 
 static double scr_fs_cb_open(const ScrStr *path, const ScrDyn *flag, double mode, const char *fallback) {
-  const char *f = scr_fs_dyn_absent(flag) ? fallback : flag->kind == SCR_DYN_STR ? flag->v.str->data : NULL;
+  const char *f = scr_fs_dyn_absent(flag) ? fallback : flag->kind == SCR_DYN_STR ? scr_str_flat_view(flag->v.str)->data : NULL;
   if (!f) {
     static const char message[] = "Runtime numeric filesystem flags have no portable native lowering";
     scr_throw_error_msg_code(SCR_ERR_ERROR, message, sizeof message - 1, "SC2020");
@@ -303,7 +303,7 @@ static double scr_fs_cb_open(const ScrStr *path, const ScrDyn *flag, double mode
     return -1;
   }
   if (scr_exc_pending()) return -1;
-  int fd = open(path->data, bits, (mode_t)mode);
+  int fd = open(scr_str_flat_view(path)->data, bits, (mode_t)mode);
   if (fd < 0) scr_fs_throw(errno, "open", path);
   return fd;
 }
@@ -312,7 +312,7 @@ static ScrStr *scr_fs_cb_path(const ScrDyn *value, const char *name) {
   if (!scr_fs_path_chk(value, name)) return NULL;
   ScrStr *path = value->kind == SCR_DYN_STR ? scr_str_retain(value->v.str)
     : scr_bytes_string(value->v.bytes, 0, value->v.bytes->len);
-  if (memchr(path->data, 0, path->len)) {
+  if (memchr(scr_str_flat_view(path)->data, 0, scr_str_flat_view(path)->len)) {
     scr_fs_invalid_named_path(value, path, name);
     scr_str_release(path);
     return NULL;
@@ -368,9 +368,9 @@ static int scr_fs_symlink_type(const ScrDyn *type) {
   if (scr_fs_dyn_absent(type)) return -1;
   if (type->kind == SCR_DYN_STR) {
     const ScrStr *s = type->v.str;
-    if (s->len == 4 && !memcmp(s->data, "file", 4)) return 0;
-    if (s->len == 3 && !memcmp(s->data, "dir", 3)) return 1;
-    if (s->len == 8 && !memcmp(s->data, "junction", 8)) return 2;
+    if (scr_str_flat_view(s)->len == 4 && !memcmp(scr_str_flat_view(s)->data, "file", 4)) return 0;
+    if (scr_str_flat_view(s)->len == 3 && !memcmp(scr_str_flat_view(s)->data, "dir", 3)) return 1;
+    if (scr_str_flat_view(s)->len == 8 && !memcmp(scr_str_flat_view(s)->data, "junction", 8)) return 2;
   }
   scr_dyn_arg_value_fail("type", "must be one of: 'dir', 'file', 'junction', null, undefined", type);
   return -1;
@@ -452,7 +452,7 @@ static ScrDyn *scr_fs_readlink_encoding(const ScrDyn *options) {
   }
   ScrDyn *encoding = options->kind == SCR_DYN_STR ? scr_dyn_retain((ScrDyn *)options) : scr_fs_cb_option(options, "encoding");
   if (!encoding) return NULL;
-  bool buffer = encoding->kind == SCR_DYN_STR && encoding->v.str->len == 6 && !memcmp(encoding->v.str->data, "buffer", 6);
+  bool buffer = encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len == 6 && !memcmp(scr_str_flat_view(encoding->v.str)->data, "buffer", 6);
   if (!buffer && scr_dyn_truthy(encoding) &&
       (encoding->kind != SCR_DYN_STR || !scr_bytes_is_encoding(encoding->v.str))) {
     scr_dyn_arg_value_fail("encoding", "is invalid encoding", encoding);
@@ -474,11 +474,11 @@ static ScrDyn *scr_fs_readlink_result(ScrStr *path, const ScrDyn *encoding) {
   ScrBytes *bytes = scr_fs_readlink_bytes(path);
   if (!bytes) return NULL;
   ScrDyn *result;
-  if (encoding->kind == SCR_DYN_STR && encoding->v.str->len == 6 && !memcmp(encoding->v.str->data, "buffer", 6)) {
+  if (encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len == 6 && !memcmp(scr_str_flat_view(encoding->v.str)->data, "buffer", 6)) {
     result = scr_dyn_new_buffer(bytes);
   }
   else {
-    ScrStr *codec = encoding->kind == SCR_DYN_STR && encoding->v.str->len ? scr_str_retain(encoding->v.str) : scr_str_new("utf8", 4);
+    ScrStr *codec = encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len ? scr_str_retain(encoding->v.str) : scr_str_new("utf8", 4);
     ScrStr *text = scr_bytes_to_str(bytes, codec);
     scr_str_release(codec);
     result = text ? scr_dyn_new_str(text) : NULL;
@@ -529,9 +529,9 @@ static ScrDyn *scr_fs_cb_encoded_path(ScrStr *text, const ScrDyn *options) {
   if (!text) return NULL;
   ScrDyn *encoding = options->kind == SCR_DYN_STR ? scr_dyn_retain((ScrDyn *)options) : scr_fs_cb_option(options, "encoding");
   ScrDyn *value = NULL;
-  if (encoding && encoding->kind == SCR_DYN_STR && encoding->v.str->len > 0 && !scr_fs_str_is(encoding->v.str, "utf8") &&
+  if (encoding && encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len > 0 && !scr_fs_str_is(encoding->v.str, "utf8") &&
       !scr_fs_str_is(encoding->v.str, "utf-8")) {
-    ScrBytes *bytes = scr_bytes_from_data((const uint8_t *)text->data, text->len);
+    ScrBytes *bytes = scr_bytes_from_data((const uint8_t *)scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
     if (scr_fs_str_is(encoding->v.str, "buffer")) value = scr_dyn_new_buffer(bytes);
     else {
       ScrStr *encoded = scr_bytes_to_str_checked(bytes, encoding->v.str);
@@ -676,7 +676,7 @@ static size_t scr_fs_cb_slot(const char *op, ScrDyn *const *args, size_t argc) {
 /* parseFileMode(value, name): an octal string or a uint32. */
 static bool scr_fs_cb_file_mode(const ScrDyn *value, const char *name, double *mode) {
   if (!scr_fs_mode_chk(value, name)) return false;
-  *mode = value->kind == SCR_DYN_STR ? (double)strtoul(value->v.str->data, NULL, 8) : value->v.num;
+  *mode = value->kind == SCR_DYN_STR ? (double)strtoul(scr_str_flat_view(value->v.str)->data, NULL, 8) : value->v.num;
   return true;
 }
 
@@ -757,7 +757,7 @@ static ScrArr *scr_fs_cb_vectors(const ScrDyn *buffers) {
 }
 
 static ScrDyn *scr_fs_cb_invoke(ScrStr *member, ScrDyn *const *args, size_t argc) {
-  const char *op = member->data;
+  const char *op = scr_str_flat_view(member)->data;
   if (!strcmp(op, "cp")) {
     /* fs.cp(src, dest[, options], callback): makeCallback, then the option
      * and path validation (thrown), then the copy, whose error reaches the
@@ -936,14 +936,14 @@ static ScrDyn *scr_fs_cb_invoke(ScrStr *member, ScrDyn *const *args, size_t argc
     ScrDyn *encoding = options->kind == SCR_DYN_STR ? scr_dyn_retain((ScrDyn *)options) : scr_fs_cb_option(options, "encoding");
     ScrDyn *flag = options->kind == SCR_DYN_STR ? NULL : scr_fs_cb_option(options, "flag");
     bool reading_flag = !flag || flag->kind == SCR_DYN_UNDEF || flag->kind == SCR_DYN_NULL ||
-                        (flag->kind == SCR_DYN_STR && flag->v.str->len == 1 && flag->v.str->data[0] == 'r');
+                        (flag->kind == SCR_DYN_STR && scr_str_flat_view(flag->v.str)->len == 1 && scr_str_flat_view(flag->v.str)->data[0] == 'r');
     if (encoding && reading_flag) result = scr_fs_read_file_sync_dyn(path, encoding);
     else if (encoding) {
       /* Node opens the file with options.flag ('w+' truncates first), then
        * reads the whole descriptor. */
       double opened = scr_fs_cb_open(path, flag, 0666, "r");
       if (opened >= 0 && !scr_exc_pending()) {
-        bool text = encoding->kind == SCR_DYN_STR && encoding->v.str->len > 0;
+        bool text = encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len > 0;
         if (text && scr_fs_str_is(encoding->v.str, "buffer")) {
           ScrBytes *bytes = scr_fs_read_fd_bytes(opened);
           ScrStr *content = bytes ? scr_bytes_to_str_checked(bytes, encoding->v.str) : NULL;
@@ -1021,7 +1021,7 @@ static ScrDyn *scr_fs_cb_invoke(ScrStr *member, ScrDyn *const *args, size_t argc
   else if (!strcmp(op, "close")) scr_fs_close(fd);
   else if (!strcmp(op, "fsync")) scr_fs_fsync(fd);
   else if (!strcmp(op, "fdatasync")) scr_fs_fdatasync(fd);
-  else if (!strcmp(op, "fchmod")) scr_fs_fchmod(fd, ARG(1)->kind == SCR_DYN_STR ? (double)strtol(ARG(1)->v.str->data, NULL, 8) : ARG(1)->v.num);
+  else if (!strcmp(op, "fchmod")) scr_fs_fchmod(fd, ARG(1)->kind == SCR_DYN_STR ? (double)strtol(scr_str_flat_view(ARG(1)->v.str)->data, NULL, 8) : ARG(1)->v.num);
   else if (vector) {
     double position = ARG(2)->kind == SCR_DYN_NUM ? ARG(2)->v.num : -1;
     result = scr_dyn_new_num(!strcmp(op, "readv") ? scr_fs_readv_sync(fd, vectors, position) : scr_fs_writev_sync(fd, vectors, position));
@@ -1046,10 +1046,10 @@ static ScrDyn *scr_fs_cb_invoke(ScrStr *member, ScrDyn *const *args, size_t argc
     ScrStr *codec = encoding->kind == SCR_DYN_STR && scr_bytes_is_encoding(encoding->v.str)
         ? scr_str_retain(encoding->v.str)
         : scr_str_new("utf8", 4);
-    if (codec->len == 3 && memcmp(codec->data, "hex", 3) == 0 && string->v.str->len % 2 != 0) {
+    if (scr_str_flat_view(codec)->len == 3 && memcmp(scr_str_flat_view(codec)->data, "hex", 3) == 0 && scr_str_flat_view(string->v.str)->len % 2 != 0) {
       /* validateEncoding throws at the call, before any write. */
       char reason[64];
-      snprintf(reason, sizeof reason, "is invalid for data of length %zu", (size_t)string->v.str->len);
+      snprintf(reason, sizeof reason, "is invalid for data of length %zu", (size_t)scr_str_flat_view(string->v.str)->len);
       scr_dyn_arg_value_fail("encoding", reason, encoding);
       scr_str_release(codec);
       return NULL;
@@ -1316,8 +1316,8 @@ ScrBytes *scr_buffer_from_dyn(const ScrDyn *value, const ScrStr *encoding) {
     }
     const ScrDyn *type = scr_dyn_obj_get(value, "type", 4);
     const ScrDyn *data = scr_dyn_obj_get(value, "data", 4);
-    if (type && type->kind == SCR_DYN_STR && type->v.str->len == 6 &&
-        memcmp(type->v.str->data, "Buffer", 6) == 0 && data && data->kind == SCR_DYN_ARR) {
+    if (type && type->kind == SCR_DYN_STR && scr_str_flat_view(type->v.str)->len == 6 &&
+        memcmp(scr_str_flat_view(type->v.str)->data, "Buffer", 6) == 0 && data && data->kind == SCR_DYN_ARR) {
       /* Element coercion may mutate the parent and replace `data`. */
       ScrDyn *held = scr_dyn_retain((ScrDyn *)data);
       ScrBytes *out = scr_buffer_from_array_like(held, (double)held->v.arr.len);
@@ -1485,7 +1485,7 @@ static bool scr_fs_dyn_absent(const ScrDyn *v) {
 
 static bool scr_fs_str_is(const ScrStr *s, const char *lit) {
   size_t n = strlen(lit);
-  return s->len == n && memcmp(s->data, lit, n) == 0;
+  return scr_str_flat_view(s)->len == n && memcmp(scr_str_flat_view(s)->data, lit, n) == 0;
 }
 
 /* Node's maybeCallback/validateFunction over a callback slot. */
@@ -1536,7 +1536,7 @@ static bool scr_fs_encoding_chk(const ScrDyn *opts) {
   }
   if (scr_fs_dyn_absent(enc)) return true;
   if (enc->kind == SCR_DYN_STR) {
-    if (enc->v.str->len == 0) return true; /* falsy: assertEncoding's `encoding &&` gate */
+    if (scr_str_flat_view(enc->v.str)->len == 0) return true; /* falsy: assertEncoding's `encoding &&` gate */
     if (scr_bytes_is_encoding(enc->v.str) || scr_fs_str_is(enc->v.str, "buffer")) return true;
   }
   if (enc->kind == SCR_DYN_BOOL && !enc->v.b) return true;
@@ -1550,9 +1550,9 @@ static bool scr_fs_encoding_chk(const ScrDyn *opts) {
 static bool scr_fs_mode_chk(const ScrDyn *m, const char *name) {
   if (m->kind == SCR_DYN_STR) {
     const ScrStr *s = m->v.str;
-    bool octal = s->len > 0;
-    for (size_t i = 0; octal && i < s->len; i++) {
-      if (s->data[i] < '0' || s->data[i] > '7') octal = false;
+    bool octal = scr_str_flat_view(s)->len > 0;
+    for (size_t i = 0; octal && i < scr_str_flat_view(s)->len; i++) {
+      if (scr_str_flat_view(s)->data[i] < '0' || scr_str_flat_view(s)->data[i] > '7') octal = false;
     }
     if (octal) return true;
     scr_dyn_arg_value_fail(name, "must be a 32-bit unsigned integer or an octal string", m);
@@ -1745,8 +1745,8 @@ void scr_fs_lchmod_chk(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb,
 static void scr_fs_lchmod_apply(const ScrDyn *path, const ScrDyn *mode) {
   ScrStr *p = path->kind == SCR_DYN_STR ? scr_str_retain(path->v.str)
                                         : scr_bytes_string(path->v.bytes, 0, path->v.bytes->len);
-  double m = mode->kind == SCR_DYN_NUM ? mode->v.num : (double)strtol(mode->v.str->data, NULL, 8);
-  if (lchmod(p->data, (mode_t)m) != 0) scr_fs_throw(errno, "lchmod", p);
+  double m = mode->kind == SCR_DYN_NUM ? mode->v.num : (double)strtol(scr_str_flat_view(mode->v.str)->data, NULL, 8);
+  if (lchmod(scr_str_flat_view(p)->data, (mode_t)m) != 0) scr_fs_throw(errno, "lchmod", p);
   scr_str_release(p);
 }
 #endif
@@ -1906,7 +1906,7 @@ void scr_fs_stream_opts_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr
 ScrStr *scr_fs_stream_path(const ScrDyn *value) { return scr_fs_checked_path(value, "path"); }
 
 int scr_fs_stream_flags(const ScrDyn *flag, const char *fallback) {
-  const char *f = scr_fs_dyn_absent(flag) ? fallback : flag->kind == SCR_DYN_STR ? flag->v.str->data : NULL;
+  const char *f = scr_fs_dyn_absent(flag) ? fallback : flag->kind == SCR_DYN_STR ? scr_str_flat_view(flag->v.str)->data : NULL;
   if (!f) {
     static const char message[] = "Runtime numeric filesystem flags have no portable native lowering";
     scr_throw_error_msg_code(SCR_ERR_ERROR, message, sizeof message - 1, "SC2020");

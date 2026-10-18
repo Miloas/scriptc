@@ -85,16 +85,16 @@ static void scr_file_handle_buf_char(ScrFileHandleBuf *b, char c) {
 }
 
 static bool scr_file_handle_has_dollar_brace(const ScrStr *value) {
-  for (size_t i = 0; i + 1 < value->len; i++) {
-    if (value->data[i] == '$' && value->data[i + 1] == '{') return true;
+  for (size_t i = 0; i + 1 < scr_str_flat_view(value)->len; i++) {
+    if (scr_str_flat_view(value)->data[i] == '$' && scr_str_flat_view(value)->data[i + 1] == '{') return true;
   }
   return false;
 }
 
 static char scr_file_handle_inspect_quote(const ScrStr *value) {
-  if (!memchr(value->data, '\'', value->len)) return '\'';
-  if (!memchr(value->data, '"', value->len)) return '"';
-  if (!memchr(value->data, '`', value->len) &&
+  if (!memchr(scr_str_flat_view(value)->data, '\'', scr_str_flat_view(value)->len)) return '\'';
+  if (!memchr(scr_str_flat_view(value)->data, '"', scr_str_flat_view(value)->len)) return '"';
+  if (!memchr(scr_str_flat_view(value)->data, '`', scr_str_flat_view(value)->len) &&
       !scr_file_handle_has_dollar_brace(value)) {
     return '`';
   }
@@ -110,8 +110,8 @@ static ScrStr *scr_file_handle_inspect(const ScrStr *value) {
   ScrFileHandleBuf b = {0};
   char quote = scr_file_handle_inspect_quote(value);
   scr_file_handle_buf_char(&b, quote);
-  for (size_t i = 0; i < value->len; i++) {
-    unsigned char c = (unsigned char)value->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(value)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(value)->data[i];
     if (c == '\\' || (c == '\'' && quote == '\'')) {
       scr_file_handle_buf_char(&b, '\\');
       scr_file_handle_buf_char(&b, (char)c);
@@ -129,12 +129,12 @@ static ScrStr *scr_file_handle_inspect(const ScrStr *value) {
       char escaped[5];
       int len = snprintf(escaped, sizeof escaped, "\\x%02X", c);
       scr_file_handle_buf_bytes(&b, escaped, (size_t)len);
-    } else if (c == 0xc2 && i + 1 < value->len &&
-               (unsigned char)value->data[i + 1] >= 0x80 &&
-               (unsigned char)value->data[i + 1] <= 0x9f) {
+    } else if (c == 0xc2 && i + 1 < scr_str_flat_view(value)->len &&
+               (unsigned char)scr_str_flat_view(value)->data[i + 1] >= 0x80 &&
+               (unsigned char)scr_str_flat_view(value)->data[i + 1] <= 0x9f) {
       char escaped[5];
       int len = snprintf(escaped, sizeof escaped, "\\x%02X",
-                         (unsigned char)value->data[++i]);
+                         (unsigned char)scr_str_flat_view(value)->data[++i]);
       scr_file_handle_buf_bytes(&b, escaped, (size_t)len);
     } else {
       scr_file_handle_buf_char(&b, (char)c);
@@ -147,7 +147,7 @@ static ScrStr *scr_file_handle_inspect(const ScrStr *value) {
   ScrStr *head = scr_str_slice(full, 0, 128);
   scr_str_release(full);
   ScrFileHandleBuf truncated = {0};
-  scr_file_handle_buf_bytes(&truncated, head->data, head->len);
+  scr_file_handle_buf_bytes(&truncated, scr_str_flat_view(head)->data, scr_str_flat_view(head)->len);
   scr_file_handle_buf_cstr(&truncated, "...");
   scr_str_release(head);
   ScrStr *out = scr_str_new(truncated.data, truncated.len);
@@ -160,7 +160,7 @@ static void scr_file_handle_arg_value_error(const char *prefix,
   ScrStr *inspected = scr_file_handle_inspect(value);
   ScrFileHandleBuf msg = {0};
   scr_file_handle_buf_cstr(&msg, prefix);
-  scr_file_handle_buf_bytes(&msg, inspected->data, inspected->len);
+  scr_file_handle_buf_bytes(&msg, scr_str_flat_view(inspected)->data, scr_str_flat_view(inspected)->len);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg.data, msg.len,
                            "ERR_INVALID_ARG_VALUE");
   free(msg.data);
@@ -169,7 +169,7 @@ static void scr_file_handle_arg_value_error(const char *prefix,
 
 static bool scr_file_handle_flag_eq(const ScrStr *flags, const char *want) {
   size_t len = strlen(want);
-  return flags->len == len && memcmp(flags->data, want, len) == 0;
+  return scr_str_flat_view(flags)->len == len && memcmp(scr_str_flat_view(flags)->data, want, len) == 0;
 }
 
 static void scr_file_handle_invalid_flags(const ScrStr *flags) {
@@ -178,7 +178,7 @@ static void scr_file_handle_invalid_flags(const ScrStr *flags) {
 }
 
 static bool scr_file_handle_path_valid(const ScrStr *path) {
-  if (!memchr(path->data, 0, path->len)) return true;
+  if (!memchr(scr_str_flat_view(path)->data, 0, scr_str_flat_view(path)->len)) return true;
   scr_file_handle_arg_value_error(
       "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
       path);
@@ -235,7 +235,7 @@ ScrFileHandle *scr_file_handle_open(ScrStr *path, ScrStr *flags, double mode) {
   int of = scr_file_handle_open_flags(flags);
   if (of < 0) return NULL;
   if (!scr_file_handle_mode_valid(mode)) return NULL;
-  int fd = open(path->data, of | O_BINARY, (mode_t)mode);
+  int fd = open(scr_str_flat_view(path)->data, of | O_BINARY, (mode_t)mode);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return NULL;
@@ -440,7 +440,7 @@ static void scr_file_handle_write_all(ScrFileHandle *h, const void *data,
 void scr_file_handle_write_file(ScrFileHandle *h, ScrStr *data) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  scr_file_handle_write_all(h, bytes, data->len);
+  scr_file_handle_write_all(h, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
 }
 

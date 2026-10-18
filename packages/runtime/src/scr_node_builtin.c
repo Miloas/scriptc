@@ -29,7 +29,7 @@ static bool scr_system_error_number(const ScrDyn *error, double *number) {
     scr_jb_puts(&buffer, "The value of \"err\" is out of range. It must be a negative integer. Received ");
     scr_jb_puts(&buffer, received);
     ScrStr *message = scr_jb_finish(&buffer);
-    scr_throw_error_msg_code(SCR_ERR_RANGE, message->data, message->len, "ERR_OUT_OF_RANGE");
+    scr_throw_error_msg_code(SCR_ERR_RANGE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_OUT_OF_RANGE");
     scr_str_release(message);
     return false;
   }
@@ -132,7 +132,7 @@ static ScrDyn *scr_hrtime_call(ScrClosure *closure, ScrDyn *const *args, size_t 
       scr_jb_put_str(&message, length);
       scr_str_release(length);
       ScrStr *text = scr_jb_finish(&message);
-      scr_throw_error_msg_code(SCR_ERR_RANGE, text->data, text->len, "ERR_OUT_OF_RANGE");
+      scr_throw_error_msg_code(SCR_ERR_RANGE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "ERR_OUT_OF_RANGE");
       scr_str_release(text);
       return NULL;
     }
@@ -209,7 +209,7 @@ static ScrDyn *scr_global_get(void *handle, const char *key, size_t length) {
   for (size_t i = 0; i < length; i++) scr_jb_putc(&text, key[i]);
   scr_jb_puts(&text, " through a stored global object is not supported yet [SC2020]");
   ScrStr *message = scr_jb_finish(&text);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, message->data, message->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "SC2020");
   scr_str_release(message);
   return NULL;
 }
@@ -238,8 +238,8 @@ ScrDyn *scr_global_native_init(ScrArr *known, ScrDyn *(*console_get)(void)) {
   }
   for (size_t i = 0; i < known->len; i++) {
     ScrStr *key = (ScrStr *)scr_arr_get_ref(known, (double)i);
-    if (!scr_dyn_obj_get(scr_global_known, key->data, key->len))
-      scr_dyn_obj_set(scr_global_known, key->data, key->len, scr_dyn_new_bool(true));
+    if (!scr_dyn_obj_get(scr_global_known, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len))
+      scr_dyn_obj_set(scr_global_known, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, scr_dyn_new_bool(true));
     scr_str_release(key);
   }
   return scr_dyn_new_handle(&scr_global_known, SCR_DYNH_GLOBAL);
@@ -319,14 +319,14 @@ ScrStr *scr_process_builtin_id(ScrDyn *id, ScrArr *known) {
     return NULL;
   }
   ScrStr *value = id->v.str;
-  bool prefix = value->len >= 5 && memcmp(value->data, "node:", 5) == 0;
+  bool prefix = scr_str_flat_view(value)->len >= 5 && memcmp(scr_str_flat_view(value)->data, "node:", 5) == 0;
   for (size_t i = 0; i < known->len; i++) {
     ScrStr *entry = (ScrStr *)scr_arr_get_ref(known, (double)i);
-    bool exact = entry->len == value->len && memcmp(entry->data, value->data, value->len) == 0;
-    bool prefix_only = entry->len >= 5 && memcmp(entry->data, "node:", 5) == 0;
-    bool bare = prefix && !prefix_only && entry->len == value->len - 5 && memcmp(entry->data, value->data + 5, entry->len) == 0;
+    bool exact = scr_str_flat_view(entry)->len == scr_str_flat_view(value)->len && memcmp(scr_str_flat_view(entry)->data, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len) == 0;
+    bool prefix_only = scr_str_flat_view(entry)->len >= 5 && memcmp(scr_str_flat_view(entry)->data, "node:", 5) == 0;
+    bool bare = prefix && !prefix_only && scr_str_flat_view(entry)->len == scr_str_flat_view(value)->len - 5 && memcmp(scr_str_flat_view(entry)->data, scr_str_flat_view(value)->data + 5, scr_str_flat_view(entry)->len) == 0;
     scr_str_release(entry);
-    if (exact || bare) return scr_str_new(value->data + (prefix ? 5 : 0), value->len - (prefix ? 5 : 0));
+    if (exact || bare) return scr_str_new(scr_str_flat_view(value)->data + (prefix ? 5 : 0), scr_str_flat_view(value)->len - (prefix ? 5 : 0));
   }
   return scr_str_new("", 0);
 }
@@ -338,7 +338,7 @@ ScrDyn *scr_process_builtin_module(ScrStr *id, ScrDyn *getter) {
   };
   scr_dyn_handle_install(SCR_DYNH_BUILTIN_MODULE, &ops);
   for (ScrBuiltinModule *module = scr_builtin_modules; module; module = module->next) {
-    if (module->id->len == id->len && memcmp(module->id->data, id->data, id->len) == 0)
+    if (scr_str_flat_view(module->id)->len == scr_str_flat_view(id)->len && memcmp(scr_str_flat_view(module->id)->data, scr_str_flat_view(id)->data, scr_str_flat_view(id)->len) == 0)
       return scr_dyn_new_handle(module, SCR_DYNH_BUILTIN_MODULE);
   }
   if (!scr_builtin_cleanup_registered) {
@@ -356,14 +356,14 @@ ScrDyn *scr_process_builtin_unsupported(ScrStr *id, ScrStr *member) {
   ScrJsonBuf text;
   scr_jb_init(&text);
   scr_jb_puts(&text, "native builtin '");
-  scr_jb_write(&text, id->data, id->len);
-  if (member->len) {
+  scr_jb_write(&text, scr_str_flat_view(id)->data, scr_str_flat_view(id)->len);
+  if (scr_str_flat_view(member)->len) {
     scr_jb_putc(&text, '.');
-    scr_jb_write(&text, member->data, member->len);
+    scr_jb_write(&text, scr_str_flat_view(member)->data, scr_str_flat_view(member)->len);
   }
   scr_jb_puts(&text, "' is not supported through process.getBuiltinModule yet [SC2020]");
   ScrStr *message = scr_jb_finish(&text);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, message->data, message->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "SC2020");
   scr_str_release(message);
   return NULL;
 }

@@ -324,13 +324,14 @@ export function emitCallExpr(
               break;
             }
             case "string": {
+              const flat = host.flatStringIn(B, arg.name);
               const lenPtr = B.tmp();
               const len = B.tmp();
               const data = B.tmp();
-              B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${arg.name}, i64 0, i32 1`);
+              B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${flat}, i64 0, i32 1`);
               B.line(`${len} = load ${host.sizeType}, ptr ${lenPtr}`);
               B.line(
-                `${data} = getelementptr inbounds i8, ptr ${arg.name}, i64 ${host.abiOffset(24, 12)}`,
+                `${data} = getelementptr inbounds i8, ptr ${flat}, i64 ${host.abiOffset(24, 12)}`,
               );
               natTypes.push("ptr", host.sizeType);
               natArgs.push(`ptr ${data}`, `${host.sizeType} ${len}`);
@@ -599,12 +600,13 @@ export function emitCallExpr(
             break;
           }
           case "string": {
+            const flat = host.flatStringIn(B, arg.name);
             const lenPtr = B.tmp();
             const len = B.tmp();
             const data = B.tmp();
-            B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${arg.name}, i64 0, i32 1`);
+            B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${flat}, i64 0, i32 1`);
             B.line(`${len} = load i64, ptr ${lenPtr}`);
-            B.line(`${data} = getelementptr inbounds i8, ptr ${arg.name}, i64 24`);
+            B.line(`${data} = getelementptr inbounds i8, ptr ${flat}, i64 24`);
             nativeParamTypes.push("ptr", "i64");
             nativeArgs.push(`ptr ${data}`, `i64 ${len}`);
             break;

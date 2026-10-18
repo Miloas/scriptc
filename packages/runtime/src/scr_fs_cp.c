@@ -192,19 +192,19 @@ static ScrStr *cp_resolve1(const ScrStr *a) {
   return out;
 }
 
-static bool cp_is_absolute(const ScrStr *p) { return p->len > 0 && p->data[0] == '/'; }
+static bool cp_is_absolute(const ScrStr *p) { return scr_str_flat_view(p)->len > 0 && scr_str_flat_view(p)->data[0] == '/'; }
 
 /* std::filesystem::path::operator/ (POSIX). */
 static ScrStr *fs_append(const ScrStr *a, const char *b) {
   size_t bn = strlen(b);
   if (bn && b[0] == '/') return scr_str_new(b, bn);
-  if (a->len == 0) return scr_str_new(b, bn);
-  bool slash = a->data[a->len - 1] == '/';
-  size_t n = a->len + (slash ? 0 : 1) + bn;
+  if (scr_str_flat_view(a)->len == 0) return scr_str_new(b, bn);
+  bool slash = scr_str_flat_view(a)->data[scr_str_flat_view(a)->len - 1] == '/';
+  size_t n = scr_str_flat_view(a)->len + (slash ? 0 : 1) + bn;
   char *buf = malloc(n + 1);
   if (!buf) scr_trap("scriptc: out of memory\n");
-  memcpy(buf, a->data, a->len);
-  size_t at = a->len;
+  memcpy(buf, scr_str_flat_view(a)->data, scr_str_flat_view(a)->len);
+  size_t at = scr_str_flat_view(a)->len;
   if (!slash) buf[at++] = '/';
   memcpy(buf + at, b, bn);
   ScrStr *out = scr_str_new(buf, n);
@@ -216,8 +216,8 @@ static ScrStr *fs_append(const ScrStr *a, const char *b) {
  * element and the separators before it; a root-only path is its own
  * parent; "a/b/" answers "a/b". */
 static ScrStr *fs_parent(const ScrStr *p) {
-  size_t n = p->len;
-  const char *d = p->data;
+  size_t n = scr_str_flat_view(p)->len;
+  const char *d = scr_str_flat_view(p)->data;
   size_t root = n > 0 && d[0] == '/' ? 1 : 0;
   while (root < n && d[root] == '/') root++;
   if (root == n) return scr_str_new(d, root ? 1 : 0);
@@ -236,13 +236,13 @@ static ScrStr *fs_parent(const ScrStr *p) {
 
 static bool fs_has_parent(const ScrStr *p) {
   ScrStr *parent = fs_parent(p);
-  bool has = parent->len > 0;
+  bool has = scr_str_flat_view(parent)->len > 0;
   scr_str_release(parent);
   return has;
 }
 
 static bool cp_str_eq(const ScrStr *a, const ScrStr *b) {
-  return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  return scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len) == 0;
 }
 
 static ScrStr *cp_cwd(void) {
@@ -258,7 +258,7 @@ static ScrStr *cp_cwd(void) {
 static ScrStr *fs_absolute(const ScrStr *p) {
   if (cp_is_absolute(p)) return scr_str_retain((ScrStr *)p);
   ScrStr *cwd = cp_cwd();
-  ScrStr *out = p->len ? fs_append(cwd, p->data) : scr_str_retain(cwd);
+  ScrStr *out = scr_str_flat_view(p)->len ? fs_append(cwd, scr_str_flat_view(p)->data) : scr_str_retain(cwd);
   scr_str_release(cwd);
   return out;
 }
@@ -287,8 +287,8 @@ static void fs_parts_push(FsParts *parts, const char *s, size_t n) {
 
 static FsParts fs_split(const ScrStr *p) {
   FsParts parts = { NULL, 0 };
-  size_t i = 0, n = p->len;
-  const char *d = p->data;
+  size_t i = 0, n = scr_str_flat_view(p)->len;
+  const char *d = scr_str_flat_view(p)->data;
   if (n && d[0] == '/') {
     fs_parts_push(&parts, "/", 1);
     while (i < n && d[i] == '/') i++;
@@ -365,7 +365,7 @@ static ScrStr *fs_lexically_normal(const ScrStr *p) {
 }
 
 static ScrStr *fs_realpath(const ScrStr *p) {
-  char *real = realpath(p->data, NULL);
+  char *real = realpath(scr_str_flat_view(p)->data, NULL);
   if (!real) return NULL;
   ScrStr *out = cp_str(real);
   free(real);
@@ -376,7 +376,7 @@ static ScrStr *fs_realpath(const ScrStr *p) {
  * with realpath, the rest appended and lexically normalized. */
 static ScrStr *fs_weakly_canonical(const ScrStr *p) {
   struct stat st;
-  if (stat(p->data, &st) == 0) {
+  if (stat(scr_str_flat_view(p)->data, &st) == 0) {
     ScrStr *real = fs_realpath(p);
     if (real) return real;
   }
@@ -385,14 +385,14 @@ static ScrStr *fs_weakly_canonical(const ScrStr *p) {
   size_t i = 0;
   for (; i < parts.n; i++) {
     ScrStr *next = fs_append(result, parts.v[i]);
-    if (stat(next->data, &st) != 0) {
+    if (stat(scr_str_flat_view(next)->data, &st) != 0) {
       scr_str_release(next);
       break;
     }
     scr_str_release(result);
     result = next;
   }
-  if (result->len) {
+  if (scr_str_flat_view(result)->len) {
     ScrStr *real = fs_realpath(result);
     if (real) {
       scr_str_release(result);
@@ -454,7 +454,7 @@ static void cp_system(const char *code, const char *prefix, int e, const char *f
 }
 
 static void cp_eexist(const ScrStr *dest) {
-  cp_system("ERR_FS_CP_EEXIST", "Target already exists", EEXIST, "%s already exists", dest->data, NULL, dest);
+  cp_system("ERR_FS_CP_EEXIST", "Target already exists", EEXIST, "%s already exists", scr_str_flat_view(dest)->data, NULL, dest);
 }
 
 /* ── the user filter ────────────────────────────────────────────────── */
@@ -492,7 +492,7 @@ static bool cp_filter(const ScrFsCp *job, const ScrStr *src, const ScrStr *dest,
 /* ── file operations ────────────────────────────────────────────────── */
 
 static int cp_stat(const ScrStr *path, bool follow, struct stat *st) {
-  return follow ? stat(path->data, st) : lstat(path->data, st);
+  return follow ? stat(scr_str_flat_view(path)->data, st) : lstat(scr_str_flat_view(path)->data, st);
 }
 
 /* Copies in's remaining bytes to out; 0 or the errno. Linux copies in the
@@ -542,7 +542,7 @@ static int cp_copy_bytes(int in, int out) {
  * COPYFILE_FICLONE_FORCE requires a reflink. Copying a file onto itself
  * succeeds without touching it. Errors use `syscall` with both paths. */
 static void cp_copyfile(const ScrStr *src, const ScrStr *dest, int mode, const char *syscall) {
-  int in = open(src->data, O_RDONLY);
+  int in = open(scr_str_flat_view(src)->data, O_RDONLY);
   if (in < 0) {
     scr_fs_throw2(errno, syscall, src, dest);
     return;
@@ -555,7 +555,7 @@ static void cp_copyfile(const ScrStr *src, const ScrStr *dest, int mode, const c
     return;
   }
   int flags = O_WRONLY | O_CREAT | ((mode & 1) ? O_EXCL : 0);
-  int out = open(dest->data, flags, sst.st_mode & 07777);
+  int out = open(scr_str_flat_view(dest)->data, flags, sst.st_mode & 07777);
   if (out < 0) {
     int e = errno;
     close(in);
@@ -616,7 +616,7 @@ static double cp_stamp_ms(time_t sec, long nsec) {
  * values (millisecond precision). */
 static bool cp_set_dest_timestamps(const ScrStr *src, const ScrStr *dest) {
   struct stat st;
-  if (stat(src->data, &st) != 0) {
+  if (stat(scr_str_flat_view(src)->data, &st) != 0) {
     scr_fs_throw(errno, "stat", src);
     return false;
   }
@@ -628,7 +628,7 @@ static bool cp_set_dest_timestamps(const ScrStr *src, const ScrStr *dest) {
  * nanosecond times. */
 static bool cp_copy_utimes(const ScrStr *src, const ScrStr *dest) {
   struct stat st;
-  if (stat(src->data, &st) != 0) {
+  if (stat(scr_str_flat_view(src)->data, &st) != 0) {
     scr_fs_throw(errno, "stat", src);
     return false;
   }
@@ -642,7 +642,7 @@ static bool cp_chmod(const ScrStr *path, mode_t mode) {
   (void)mode;
   return true;
 #else
-  if (chmod(path->data, mode & 07777) != 0) {
+  if (chmod(scr_str_flat_view(path)->data, mode & 07777) != 0) {
     scr_fs_throw(errno, "chmod", path);
     return false;
   }
@@ -653,7 +653,7 @@ static bool cp_chmod(const ScrStr *path, mode_t mode) {
 static ScrStr *cp_readlink(const ScrStr *path, int *err) {
   char *buf = malloc(PATH_MAX + 1);
   if (!buf) scr_trap("scriptc: out of memory\n");
-  ssize_t n = readlink(path->data, buf, PATH_MAX);
+  ssize_t n = readlink(scr_str_flat_view(path)->data, buf, PATH_MAX);
   ScrStr *target = NULL;
   if (n < 0) *err = errno;
   else target = scr_str_new(buf, (size_t)n);
@@ -664,11 +664,11 @@ static ScrStr *cp_readlink(const ScrStr *path, int *err) {
 /* mkdir -p with every error ignored (std::filesystem::create_directories
  * with an error_code the caller drops). */
 static void cp_mkdir_parents(const ScrStr *dir) {
-  if (dir->len == 0) return;
-  char *buf = malloc(dir->len + 1);
+  if (scr_str_flat_view(dir)->len == 0) return;
+  char *buf = malloc(scr_str_flat_view(dir)->len + 1);
   if (!buf) scr_trap("scriptc: out of memory\n");
-  memcpy(buf, dir->data, dir->len + 1);
-  for (size_t i = 1; i <= dir->len; i++) {
+  memcpy(buf, scr_str_flat_view(dir)->data, scr_str_flat_view(dir)->len + 1);
+  for (size_t i = 1; i <= scr_str_flat_view(dir)->len; i++) {
     if (buf[i] != '/' && buf[i] != 0) continue;
     char saved = buf[i];
     buf[i] = 0;
@@ -697,7 +697,7 @@ static void sync_get_stats(const ScrFsCp *job, const ScrStr *src, const ScrStr *
  * cannot be stat'ed. */
 static bool fs_equivalent(const ScrStr *a, const ScrStr *b) {
   struct stat sa, sb;
-  if (stat(a->data, &sa) != 0 || stat(b->data, &sb) != 0) return false;
+  if (stat(scr_str_flat_view(a)->data, &sa) != 0 || stat(scr_str_flat_view(b)->data, &sb) != 0) return false;
   return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
 }
 
@@ -713,22 +713,22 @@ static bool sync_check_paths(const ScrFsCp *job, const ScrStr *src, const ScrStr
   bool src_is_dir = S_ISDIR(sst.st_mode) || (job->dereference && S_ISLNK(sst.st_mode));
   if (dest_ok) {
     if (fs_equivalent(src, dest)) {
-      cp_native("ERR_FS_CP_EINVAL", "src and dest cannot be the same %s", dest->data, NULL);
+      cp_native("ERR_FS_CP_EINVAL", "src and dest cannot be the same %s", scr_str_flat_view(dest)->data, NULL);
       return false;
     }
     bool dest_is_dir = S_ISDIR(dst.st_mode);
     if (src_is_dir && !dest_is_dir) {
-      cp_native("ERR_FS_CP_DIR_TO_NON_DIR", "Cannot overwrite non-directory %s with directory %s", dest->data, src->data);
+      cp_native("ERR_FS_CP_DIR_TO_NON_DIR", "Cannot overwrite non-directory %s with directory %s", scr_str_flat_view(dest)->data, scr_str_flat_view(src)->data);
       return false;
     }
     if (!src_is_dir && dest_is_dir) {
-      cp_native("ERR_FS_CP_NON_DIR_TO_DIR", "Cannot overwrite directory %s with non-directory %s", dest->data, src->data);
+      cp_native("ERR_FS_CP_NON_DIR_TO_DIR", "Cannot overwrite directory %s with non-directory %s", scr_str_flat_view(dest)->data, scr_str_flat_view(src)->data);
       return false;
     }
   }
   /* The binding appends a separator to src before its prefix test. */
   ScrStr *src_slash;
-  if (src->len && src->data[src->len - 1] == '/') {
+  if (scr_str_flat_view(src)->len && scr_str_flat_view(src)->data[scr_str_flat_view(src)->len - 1] == '/') {
     src_slash = scr_str_retain((ScrStr *)src);
   } else {
     ScrStr *separator = scr_str_new("/", 1);
@@ -736,8 +736,8 @@ static bool sync_check_paths(const ScrFsCp *job, const ScrStr *src, const ScrStr
     scr_str_release(separator);
   }
   bool fail = false;
-  if (src_is_dir && dest->len >= src_slash->len && memcmp(dest->data, src_slash->data, src_slash->len) == 0) {
-    cp_native("ERR_FS_CP_EINVAL", "Cannot copy %s to a subdirectory of self %s", src_slash->data, dest->data);
+  if (src_is_dir && scr_str_flat_view(dest)->len >= scr_str_flat_view(src_slash)->len && memcmp(scr_str_flat_view(dest)->data, scr_str_flat_view(src_slash)->data, scr_str_flat_view(src_slash)->len) == 0) {
+    cp_native("ERR_FS_CP_EINVAL", "Cannot copy %s to a subdirectory of self %s", scr_str_flat_view(src_slash)->data, scr_str_flat_view(dest)->data);
     fail = true;
   }
   if (!fail) {
@@ -746,7 +746,7 @@ static bool sync_check_paths(const ScrFsCp *job, const ScrStr *src, const ScrStr
     ScrStr *grand = fs_parent(dest_parent);
     if (!cp_str_eq(src_parent, dest_parent) && fs_has_parent(dest_parent) && !cp_str_eq(grand, dest_parent) &&
         fs_equivalent(src, dest_parent)) {
-      cp_native("ERR_FS_CP_EINVAL", "Cannot copy %s to a subdirectory of self %s", src_slash->data, dest->data);
+      cp_native("ERR_FS_CP_EINVAL", "Cannot copy %s to a subdirectory of self %s", scr_str_flat_view(src_slash)->data, scr_str_flat_view(dest)->data);
       fail = true;
     }
     scr_str_release(dest_parent);
@@ -754,22 +754,22 @@ static bool sync_check_paths(const ScrFsCp *job, const ScrStr *src, const ScrStr
     scr_str_release(grand);
   }
   if (!fail && src_is_dir && !job->recursive) {
-    cp_native("ERR_FS_EISDIR", "Recursive option not enabled, cannot copy a directory: %s", src_slash->data, NULL);
+    cp_native("ERR_FS_EISDIR", "Recursive option not enabled, cannot copy a directory: %s", scr_str_flat_view(src_slash)->data, NULL);
     fail = true;
   }
   scr_str_release(src_slash);
   if (fail) return false;
   if (S_ISSOCK(sst.st_mode)) {
-    cp_native("ERR_FS_CP_SOCKET", "Cannot copy a socket file: %s", dest->data, NULL);
+    cp_native("ERR_FS_CP_SOCKET", "Cannot copy a socket file: %s", scr_str_flat_view(dest)->data, NULL);
     return false;
   }
   if (S_ISFIFO(sst.st_mode)) {
-    cp_native("ERR_FS_CP_FIFO_PIPE", "Cannot copy a FIFO pipe: %s", dest->data, NULL);
+    cp_native("ERR_FS_CP_FIFO_PIPE", "Cannot copy a FIFO pipe: %s", scr_str_flat_view(dest)->data, NULL);
     return false;
   }
   ScrStr *parent = fs_parent(dest);
   struct stat pst;
-  if (!dest_ok || stat(parent->data, &pst) != 0) cp_mkdir_parents(parent);
+  if (!dest_ok || stat(scr_str_flat_view(parent)->data, &pst) != 0) cp_mkdir_parents(parent);
   scr_str_release(parent);
   return true;
 }
@@ -781,7 +781,7 @@ static bool fs_copy_file(const ScrStr *from, const ScrStr *to, int existing, con
 /* fsBinding.cpSyncOverrideFile: std::filesystem::remove, then
  * std::filesystem::copy_file (mode 0) or uv_fs_copyfile. */
 static void sync_override_file(const ScrFsCp *job, const ScrStr *src, const ScrStr *dest) {
-  if (unlink(dest->data) != 0 && (errno != EISDIR || rmdir(dest->data) != 0)) {
+  if (unlink(scr_str_flat_view(dest)->data) != 0 && (errno != EISDIR || rmdir(scr_str_flat_view(dest)->data) != 0)) {
     scr_fs_throw_errno_exception(errno, "unlink", dest);
     return;
   }
@@ -819,8 +819,8 @@ static bool sync_copy_dir_contents(const ScrFsCp *job, const ScrStr *src, const 
 #endif
 static bool fs_copy_file(const ScrStr *from, const ScrStr *to, int existing, const ScrStr *error_path) {
   struct stat tst, fst;
-  bool exists = stat(to->data, &tst) == 0;
-  if (stat(from->data, &fst) != 0) {
+  bool exists = stat(scr_str_flat_view(to)->data, &tst) == 0;
+  if (stat(scr_str_flat_view(from)->data, &fst) != 0) {
     scr_fs_throw_errno_exception(errno, "cp", error_path);
     return false;
   }
@@ -831,16 +831,16 @@ static bool fs_copy_file(const ScrStr *from, const ScrStr *to, int existing, con
     }
     bool same = tst.st_dev == fst.st_dev && tst.st_ino == fst.st_ino;
     if (same || existing == FS_COPY_NONE) {
-      cp_native("ERR_FS_CP_EEXIST", "[ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (%s already exists)", to->data, NULL);
+      cp_native("ERR_FS_CP_EEXIST", "[ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (%s already exists)", scr_str_flat_view(to)->data, NULL);
       return false;
     }
     if (existing == FS_COPY_SKIP) return true;
   }
-  int in = open(from->data, O_RDONLY);
+  int in = open(scr_str_flat_view(from)->data, O_RDONLY);
   int e = in < 0 ? errno : 0;
   int out = -1;
   if (!e) {
-    out = open(to->data, O_WRONLY | O_CREAT | (existing == FS_COPY_OVERWRITE ? O_TRUNC : O_EXCL), S_IWUSR);
+    out = open(scr_str_flat_view(to)->data, O_WRONLY | O_CREAT | (existing == FS_COPY_OVERWRITE ? O_TRUNC : O_EXCL), S_IWUSR);
     if (out < 0) e = errno;
   }
 #ifndef __wasi__
@@ -873,14 +873,14 @@ static bool sync_copy_entry_link(const ScrFsCp *job, const ScrStr *entry, const 
     return false;
   }
   if (job->verbatim) {
-    bool ok = symlink(target->data, to->data) == 0;
+    bool ok = symlink(scr_str_flat_view(target)->data, scr_str_flat_view(to)->data) == 0;
     if (!ok) scr_fs_throw_errno_exception(errno, "cp", dest_dir);
     scr_str_release(target);
     return ok;
   }
   struct stat tst, lst;
-  if (stat(to->data, &tst) == 0) {
-    if (lstat(to->data, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+  if (stat(scr_str_flat_view(to)->data, &tst) == 0) {
+    if (lstat(scr_str_flat_view(to)->data, &lst) == 0 && S_ISLNK(lst.st_mode)) {
       ScrStr *current = cp_readlink(to, &err);
       if (!current) {
         scr_fs_throw_errno_exception(err, "cp", dest_dir);
@@ -889,13 +889,13 @@ static bool sync_copy_entry_link(const ScrFsCp *job, const ScrStr *entry, const 
       }
       struct stat ast;
       bool fail = false;
-      if (!job->dereference && stat(target->data, &ast) == 0 && S_ISDIR(ast.st_mode) && fs_inside_dir(target, current)) {
-        cp_native("ERR_FS_CP_EINVAL", "Cannot copy \"%s\" to a subdirectory of self \"%s\"", target->data, current->data);
+      if (!job->dereference && stat(scr_str_flat_view(target)->data, &ast) == 0 && S_ISDIR(ast.st_mode) && fs_inside_dir(target, current)) {
+        cp_native("ERR_FS_CP_EINVAL", "Cannot copy \"%s\" to a subdirectory of self \"%s\"", scr_str_flat_view(target)->data, scr_str_flat_view(current)->data);
         fail = true;
       } else if (S_ISDIR(tst.st_mode) && fs_inside_dir(current, target)) {
-        cp_native("ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY", "cannot overwrite \"%s\" with \"%s\"", current->data, target->data);
+        cp_native("ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY", "cannot overwrite \"%s\" with \"%s\"", scr_str_flat_view(current)->data, scr_str_flat_view(target)->data);
         fail = true;
-      } else if (unlink(to->data) != 0) {
+      } else if (unlink(scr_str_flat_view(to)->data) != 0) {
         scr_fs_throw_errno_exception(errno, "cp", dest_dir);
         fail = true;
       }
@@ -910,10 +910,10 @@ static bool sync_copy_entry_link(const ScrFsCp *job, const ScrStr *entry, const 
       return false;
     }
   }
-  ScrStr *joined = fs_append(src_dir, target->data);
+  ScrStr *joined = fs_append(src_dir, scr_str_flat_view(target)->data);
   ScrStr *absolute = fs_absolute(joined);
   ScrStr *canonical = fs_weakly_canonical(absolute);
-  bool ok = symlink(canonical->data, to->data) == 0;
+  bool ok = symlink(scr_str_flat_view(canonical)->data, scr_str_flat_view(to)->data) == 0;
   if (!ok) scr_fs_throw_errno_exception(errno, "cp", dest_dir);
   scr_str_release(joined);
   scr_str_release(absolute);
@@ -961,7 +961,7 @@ static void cp_frames_free(CpFrames *frames) {
  * subdirectory walked when it is reached, and a directory the walk
  * created given its source's mode once its contents are in. */
 static bool sync_copy_dir_contents(const ScrFsCp *job, const ScrStr *src, const ScrStr *dest) {
-  DIR *root = opendir(src->data);
+  DIR *root = opendir(scr_str_flat_view(src)->data);
   if (!root) {
     scr_fs_throw_errno_exception(errno, "cp", src);
     return false;
@@ -975,7 +975,7 @@ static bool sync_copy_dir_contents(const ScrFsCp *job, const ScrStr *src, const 
     if (!entry) {
       CpFrame done = frames.v[--frames.n];
 #ifndef __wasi__
-      if (done.flag && chmod(done.dest->data, done.mode & 07777) != 0) {
+      if (done.flag && chmod(scr_str_flat_view(done.dest)->data, done.mode & 07777) != 0) {
         scr_fs_throw_errno_exception(errno, "cp", done.dest);
         ok = false;
       }
@@ -999,19 +999,19 @@ static bool sync_copy_dir_contents(const ScrFsCp *job, const ScrStr *src, const 
       known = true;
     }
 #endif
-    if (!known && lstat(from->data, &lst) != 0) {
+    if (!known && lstat(scr_str_flat_view(from)->data, &lst) != 0) {
       scr_fs_throw_errno_exception(errno, "cp", top->dest);
       ok = false;
     } else if (S_ISLNK(lst.st_mode)) {
       ok = sync_copy_entry_link(job, from, to, top->src, top->dest);
     } else if (S_ISDIR(lst.st_mode)) {
-      bool created = mkdir(to->data, 0777) == 0;
+      bool created = mkdir(scr_str_flat_view(to)->data, 0777) == 0;
       struct stat tst;
-      if (!created && (errno != EEXIST || stat(to->data, &tst) != 0 || !S_ISDIR(tst.st_mode))) {
+      if (!created && (errno != EEXIST || stat(scr_str_flat_view(to)->data, &tst) != 0 || !S_ISDIR(tst.st_mode))) {
         scr_fs_throw_errno_exception(errno == EEXIST ? EEXIST : errno, "cp", to);
         ok = false;
       } else {
-        DIR *child = opendir(from->data);
+        DIR *child = opendir(scr_str_flat_view(from)->data);
         if (!child) {
           scr_fs_throw_errno_exception(errno, "cp", from);
           ok = false;
@@ -1032,14 +1032,14 @@ static bool sync_copy_dir_contents(const ScrFsCp *job, const ScrStr *src, const 
 /* fsBinding.cpSyncCopyDir. */
 static void sync_copy_dir_native(const ScrFsCp *job, const ScrStr *src, const ScrStr *dest) {
   struct stat st;
-  bool existed = stat(dest->data, &st) == 0;
+  bool existed = stat(scr_str_flat_view(dest)->data, &st) == 0;
   if (existed && !S_ISDIR(st.st_mode)) {
     scr_fs_throw_errno_exception(ENOTDIR, "cp", dest);
     return;
   }
   if (!existed) {
     cp_mkdir_parents(dest);
-    if (stat(dest->data, &st) != 0) {
+    if (stat(scr_str_flat_view(dest)->data, &st) != 0) {
       scr_fs_throw_errno_exception(errno, "cp", dest);
       return;
     }
@@ -1047,7 +1047,7 @@ static void sync_copy_dir_native(const ScrFsCp *job, const ScrStr *src, const Sc
   if (!sync_copy_dir_contents(job, src, dest) || existed) return;
 #ifndef __wasi__
   struct stat sst;
-  if (stat(src->data, &sst) == 0 && chmod(dest->data, sst.st_mode & 07777) != 0)
+  if (stat(scr_str_flat_view(src)->data, &sst) == 0 && chmod(scr_str_flat_view(dest)->data, sst.st_mode & 07777) != 0)
     scr_fs_throw_errno_exception(errno, "cp", dest);
 #endif
 }
@@ -1079,11 +1079,11 @@ static bool sync_stats_one(const ScrFsCp *job, const ScrStr *src, const ScrStr *
       return false;
     }
     /* copyDir with a filter: mkdirSync, opendirSync, then the loop. */
-    if (!has_dest && mkdir(dest->data, 0777) != 0) {
+    if (!has_dest && mkdir(scr_str_flat_view(dest)->data, 0777) != 0) {
       scr_fs_throw(errno, "mkdir", dest);
       return false;
     }
-    DIR *dir = opendir(src->data);
+    DIR *dir = opendir(scr_str_flat_view(src)->data);
     if (!dir) {
       scr_fs_throw(errno, "opendir", src);
       return false;
@@ -1166,7 +1166,7 @@ static void sync_on_link(const ScrFsCp *job, bool has_dest, const ScrStr *src, c
     resolved_src = resolved;
   }
   struct stat ist;
-  bool src_is_dir = stat(src->data, &ist) == 0 && S_ISDIR(ist.st_mode);
+  bool src_is_dir = stat(scr_str_flat_view(src)->data, &ist) == 0 && S_ISDIR(ist.st_mode);
   if (has_dest) {
     ScrStr *resolved_dest = cp_readlink(dest, &err);
     if (!resolved_dest && err != EINVAL) {
@@ -1185,22 +1185,22 @@ static void sync_on_link(const ScrFsCp *job, bool has_dest, const ScrStr *src, c
       bool fail = false;
       if (src_is_dir && cp_is_src_subdir(resolved_src, resolved_dest)) {
         cp_system("ERR_FS_CP_EINVAL", "Invalid src or dest", EINVAL, "cannot copy %s to a subdirectory of self %s",
-                  resolved_src->data, resolved_dest->data, dest);
+                  scr_str_flat_view(resolved_src)->data, scr_str_flat_view(resolved_dest)->data, dest);
         fail = true;
       }
       struct stat gst;
       const ScrStr *guard = promise_form ? src : dest;
-      if (!fail && stat(guard->data, &gst) != 0) {
+      if (!fail && stat(scr_str_flat_view(guard)->data, &gst) != 0) {
         scr_fs_throw(errno, "stat", guard);
         fail = true;
       }
       if (!fail && S_ISDIR(gst.st_mode) && cp_is_src_subdir(resolved_dest, resolved_src)) {
         cp_system("ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY", "Cannot overwrite symlink in subdirectory of self", EINVAL,
-                  "cannot overwrite %s with %s", resolved_dest->data, resolved_src->data, dest);
+                  "cannot overwrite %s with %s", scr_str_flat_view(resolved_dest)->data, scr_str_flat_view(resolved_src)->data, dest);
         fail = true;
       }
       scr_str_release(resolved_dest);
-      if (!fail && unlink(dest->data) != 0) {
+      if (!fail && unlink(scr_str_flat_view(dest)->data) != 0) {
         scr_fs_throw(errno, "unlink", dest);
         fail = true;
       }
@@ -1210,7 +1210,7 @@ static void sync_on_link(const ScrFsCp *job, bool has_dest, const ScrStr *src, c
       }
     }
   }
-  if (symlink(resolved_src->data, dest->data) != 0) scr_fs_throw2(errno, "symlink", resolved_src, dest);
+  if (symlink(scr_str_flat_view(resolved_src)->data, scr_str_flat_view(dest)->data) != 0) scr_fs_throw2(errno, "symlink", resolved_src, dest);
   scr_str_release(resolved_src);
 }
 
@@ -1265,18 +1265,18 @@ static bool async_check_paths(const ScrFsCp *job, const ScrStr *src, const ScrSt
     bool dest_dir = S_ISDIR(out->dest.st_mode);
     if (src_dir && !dest_dir) {
       cp_system("ERR_FS_CP_DIR_TO_NON_DIR", "Cannot overwrite non-directory with directory", EISDIR,
-                "cannot overwrite non-directory %s with directory %s", dest->data, src->data, dest);
+                "cannot overwrite non-directory %s with directory %s", scr_str_flat_view(dest)->data, scr_str_flat_view(src)->data, dest);
       return false;
     }
     if (!src_dir && dest_dir) {
       cp_system("ERR_FS_CP_NON_DIR_TO_DIR", "Cannot overwrite directory with non-directory", ENOTDIR,
-                "cannot overwrite directory %s with non-directory %s", dest->data, src->data, dest);
+                "cannot overwrite directory %s with non-directory %s", scr_str_flat_view(dest)->data, scr_str_flat_view(src)->data, dest);
       return false;
     }
   }
   if (src_dir && cp_is_src_subdir(src, dest)) {
-    cp_system("ERR_FS_CP_EINVAL", "Invalid src or dest", EINVAL, "cannot copy %s to a subdirectory of self %s", src->data,
-              dest->data, dest);
+    cp_system("ERR_FS_CP_EINVAL", "Invalid src or dest", EINVAL, "cannot copy %s to a subdirectory of self %s", scr_str_flat_view(src)->data,
+              scr_str_flat_view(dest)->data, dest);
     return false;
   }
   return true;
@@ -1291,17 +1291,17 @@ static bool async_check_parent_paths(const ScrStr *src, const struct stat *sst, 
   scr_str_release(src_dir);
   scr_str_release(dest_dir);
   bool ok = true;
-  bool done = cp_str_eq(src_parent, dest_parent) || (dest_parent->len == 1 && dest_parent->data[0] == '/');
+  bool done = cp_str_eq(src_parent, dest_parent) || (scr_str_flat_view(dest_parent)->len == 1 && scr_str_flat_view(dest_parent)->data[0] == '/');
   struct stat st;
   if (!done) {
-    if (stat(dest_parent->data, &st) != 0) {
+    if (stat(scr_str_flat_view(dest_parent)->data, &st) != 0) {
       if (errno != ENOENT) {
         scr_fs_throw(errno, "stat", dest_parent);
         ok = false;
       }
     } else if (st.st_ino && st.st_dev && st.st_ino == sst->st_ino && st.st_dev == sst->st_dev) {
-      cp_system("ERR_FS_CP_EINVAL", "Invalid src or dest", EINVAL, "cannot copy %s to a subdirectory of self %s", src->data,
-                dest->data, dest);
+      cp_system("ERR_FS_CP_EINVAL", "Invalid src or dest", EINVAL, "cannot copy %s to a subdirectory of self %s", scr_str_flat_view(src)->data,
+                scr_str_flat_view(dest)->data, dest);
       ok = false;
     } else {
       ok = async_check_parent_paths(src, sst, dest_parent);
@@ -1335,7 +1335,7 @@ static bool async_stats_one(const ScrFsCp *job, bool has_dest, const ScrStr *src
   }
   if (S_ISDIR(sst.st_mode) && job->recursive) {
     if (!has_dest) {
-      if (mkdir(dest->data, 0777) != 0) {
+      if (mkdir(scr_str_flat_view(dest)->data, 0777) != 0) {
         scr_fs_throw(errno, "mkdir", dest);
         return false;
       }
@@ -1343,7 +1343,7 @@ static bool async_stats_one(const ScrFsCp *job, bool has_dest, const ScrStr *src
       cp_eexist(dest);
       return false;
     }
-    DIR *dir = opendir(src->data);
+    DIR *dir = opendir(scr_str_flat_view(src)->data);
     if (!dir) {
       scr_fs_throw(errno, "opendir", src);
       return false;
@@ -1352,12 +1352,12 @@ static bool async_stats_one(const ScrFsCp *job, bool has_dest, const ScrStr *src
     return true;
   }
   if (S_ISDIR(sst.st_mode)) {
-    cp_system("ERR_FS_EISDIR", "Path is a directory", EISDIR, "%s is a directory (not copied)", src->data, NULL, src);
+    cp_system("ERR_FS_EISDIR", "Path is a directory", EISDIR, "%s is a directory (not copied)", scr_str_flat_view(src)->data, NULL, src);
   } else if (S_ISREG(sst.st_mode) || S_ISCHR(sst.st_mode) || S_ISBLK(sst.st_mode)) {
     if (!has_dest) {
       (void)async_copy_file(job, sst.st_mode, src, dest);
     } else if (job->force) {
-      if (unlink(dest->data) != 0) scr_fs_throw(errno, "unlink", dest);
+      if (unlink(scr_str_flat_view(dest)->data) != 0) scr_fs_throw(errno, "unlink", dest);
       else (void)async_copy_file(job, sst.st_mode, src, dest);
     } else if (job->error_on_exist) {
       cp_eexist(dest);
@@ -1365,14 +1365,14 @@ static bool async_stats_one(const ScrFsCp *job, bool has_dest, const ScrStr *src
   } else if (S_ISLNK(sst.st_mode)) {
     sync_on_link(job, has_dest, src, dest, true);
   } else if (S_ISSOCK(sst.st_mode)) {
-    cp_system("ERR_FS_CP_SOCKET", "Cannot copy a socket file", EINVAL, "cannot copy a socket file: %s", dest->data, NULL,
+    cp_system("ERR_FS_CP_SOCKET", "Cannot copy a socket file", EINVAL, "cannot copy a socket file: %s", scr_str_flat_view(dest)->data, NULL,
               dest);
   } else if (S_ISFIFO(sst.st_mode)) {
-    cp_system("ERR_FS_CP_FIFO_PIPE", "Cannot copy a FIFO pipe", EINVAL, "cannot copy a FIFO pipe: %s", dest->data, NULL,
+    cp_system("ERR_FS_CP_FIFO_PIPE", "Cannot copy a FIFO pipe", EINVAL, "cannot copy a FIFO pipe: %s", scr_str_flat_view(dest)->data, NULL,
               dest);
   } else {
     cp_system("ERR_FS_CP_UNKNOWN", "Cannot copy an unknown file type", EINVAL, "cannot copy an unknown file type: %s",
-              dest->data, NULL, dest);
+              scr_str_flat_view(dest)->data, NULL, dest);
   }
   return false;
 }
@@ -1431,7 +1431,7 @@ static void cp_async(const ScrFsCp *job) {
   /* checkParentDir */
   ScrStr *parent = scr_path_dirname(job->dest);
   struct stat st;
-  if (stat(parent->data, &st) != 0) {
+  if (stat(scr_str_flat_view(parent)->data, &st) != 0) {
     if (errno != ENOENT) {
       scr_fs_throw(errno, "stat", parent);
       scr_str_release(parent);

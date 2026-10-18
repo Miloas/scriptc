@@ -1,4 +1,5 @@
 #include "scr_runtime.h"
+#include "scr_string_quickjs_prototype.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -53,6 +54,12 @@ bool scr_exit_frees(void) {
   return forced != 0;
 #endif
 }
+
+#if SCR_QUICKJS_STRINGS
+void scr_runtime_abi_v22_quickjs_strings_v1(void) {}
+#else
+void scr_runtime_abi_v22(void) {}
+#endif
 
 #ifndef SCR_LIB
 #ifdef SCR_RC_AUDIT
@@ -147,8 +154,6 @@ static void scr_enable_utf8_console_output(void) {
   }
 }
 #endif
-
-void scr_runtime_abi_v22(void) {}
 
 void scr_init(void) {
 #ifdef SCR_WORKERS
@@ -334,7 +339,7 @@ static inline void scr_fd_stream_unlock(FILE *stream) {
 static size_t scr_console_capacity(size_t n, const ScrLogArg *args) {
   size_t capacity = 1;
   for (size_t i = 0; i < n; i++) {
-    size_t length = (args[i].tag & SCR_ARG_KIND) == SCR_ARG_STR ? args[i].v.s->len : 32;
+    size_t length = (args[i].tag & SCR_ARG_KIND) == SCR_ARG_STR ? scr_str_flat_view(args[i].v.s)->len : 32;
     if (length >= SIZE_MAX - capacity) scr_trap("scriptc: console output too large\n");
     capacity += length + 1;
   }
@@ -354,10 +359,10 @@ static size_t scr_console_render(char *line, size_t n, const ScrLogArg *args, bo
     if (kind == SCR_ARG_STR) {
       if (lone && !arg->v.s->ascii) {
         maybe = true;
-        joins |= scr_wtf8_joins(line, used, arg->v.s->data, arg->v.s->len);
+        joins |= scr_wtf8_joins(line, used, scr_str_flat_view(arg->v.s)->data, scr_str_flat_view(arg->v.s)->len);
       }
-      memcpy(line + used, arg->v.s->data, arg->v.s->len);
-      used += arg->v.s->len;
+      memcpy(line + used, scr_str_flat_view(arg->v.s)->data, scr_str_flat_view(arg->v.s)->len);
+      used += scr_str_flat_view(arg->v.s)->len;
     } else if (kind == SCR_ARG_BOOL) {
       const char *text = arg->v.b ? "true" : "false";
       size_t length = arg->v.b ? 4 : 5;
@@ -390,17 +395,35 @@ SCR_TL char *(*scr_console_indenter)(const char *line, size_t *used) = NULL;
  * this line before the next JS turn. Errors are ignored (the global Node
  * console uses ignoreErrors=true for stream writes). */
 static void scr_console_write(int fd, size_t n, const ScrLogArg *args, bool global) {
+  for (size_t i = 0; i < n; i++) {
+    if ((args[i].tag & SCR_ARG_KIND) != SCR_ARG_STR || !scr_proto_is(args[i].v.s)) continue;
+    if (n > SIZE_MAX / sizeof(ScrLogArg)) scr_trap("scriptc: console output too large\n");
+    ScrLogArg *flat = malloc(n * sizeof(*flat));
+    if (!flat) scr_trap("scriptc: out of memory\n");
+    memcpy(flat, args, n * sizeof(*flat));
+    for (size_t j = i; j < n; j++) {
+      if ((args[j].tag & SCR_ARG_KIND) == SCR_ARG_STR && scr_proto_is(args[j].v.s))
+        flat[j].v.s = scr_proto_flat(args[j].v.s);
+    }
+    scr_console_write(fd, n, flat, global);
+    for (size_t j = i; j < n; j++) {
+      if ((args[j].tag & SCR_ARG_KIND) == SCR_ARG_STR && scr_proto_is(args[j].v.s))
+        scr_str_release(flat[j].v.s);
+    }
+    free(flat);
+    return;
+  }
 #if SCR_STDIO_DIRECT
   /* A large single string goes out without a copy: string + newline in one
    * vectored write. */
   if (!scr_stdio_write_hook && !scr_stdio_capture && !(global && scr_console_indenter) && n == 1 &&
       (args[0].tag & SCR_ARG_KIND) == SCR_ARG_STR &&
-      args[0].v.s->len >= SCR_CONSOLE_STACK_LINE) {
+      scr_str_flat_view(args[0].v.s)->len >= SCR_CONSOLE_STACK_LINE) {
     char *owned;
     const char *bytes = scr_str_utf8(args[0].v.s, &owned);
     FILE *locked = scr_fd_stream_lock(fd);
     if (scr_stdout_pending()) fflush(stdout);
-    struct iovec iov[2] = {{(void *)bytes, args[0].v.s->len}, {(void *)"\n", 1}};
+    struct iovec iov[2] = {{(void *)bytes, scr_str_flat_view(args[0].v.s)->len}, {(void *)"\n", 1}};
     (void)scr_fd_writev_all(fd, iov, 2);
     scr_fd_stream_unlock(locked);
     scr_str_utf8_end(owned);
@@ -490,15 +513,15 @@ bool scr_stdio_write(int fd, const void *data, size_t len) {
 /* A string chunk: a patched write receives the string itself; the stream
  * receives its UTF-8, each lone surrogate as U+FFFD. */
 static __attribute__((noinline)) bool scr_stdio_write_wide(int fd, const ScrStr *s) {
-  if (scr_stdio_write_hook) return scr_stdio_write_hook(fd, s->data, s->len, true);
+  if (scr_stdio_write_hook) return scr_stdio_write_hook(fd, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, true);
   char *owned;
   const char *bytes = scr_str_utf8(s, &owned);
-  (void)scr_stdio_write_raw(fd, bytes, s->len);
+  (void)scr_stdio_write_raw(fd, bytes, scr_str_flat_view(s)->len);
   scr_str_utf8_end(owned);
   return true;
 }
 
 bool scr_stdio_write_str(int fd, const ScrStr *s) {
   if (__builtin_expect(scr_wtf8_any(), 0) && !s->ascii) return scr_stdio_write_wide(fd, s);
-  return scr_stdio_write(fd, s->data, s->len);
+  return scr_stdio_write(fd, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
 }

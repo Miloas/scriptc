@@ -32,21 +32,21 @@
 
 static ScrStr *lu_str(const char *p, size_t n) { return scr_str_new(p, n); }
 static ScrStr *lu_cstr(const char *s) { return scr_str_new(s, strlen(s)); }
-static bool lu_truthy(const ScrStr *s) { return s && s->len > 0; }
+static bool lu_truthy(const ScrStr *s) { return s && scr_str_flat_view(s)->len > 0; }
 static bool lu_eq(const ScrStr *a, const ScrStr *b) {
   if (!a || !b) return a == b;
-  return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  return scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len) == 0;
 }
 static bool lu_is(const ScrStr *s, const char *lit) {
   size_t n = strlen(lit);
-  return s && s->len == n && memcmp(s->data, lit, n) == 0;
+  return s && scr_str_flat_view(s)->len == n && memcmp(scr_str_flat_view(s)->data, lit, n) == 0;
 }
 static void lu_set(ScrStr **slot, ScrStr *value /* moves in; NULL = null */) {
   if (*slot) scr_str_release(*slot);
   *slot = value;
 }
 static ScrStr *lu_ref(ScrStr *s) { return s ? scr_str_retain(s) : NULL; }
-static bool lu_has(const ScrStr *s, char c) { return s && memchr(s->data, c, s->len) != NULL; }
+static bool lu_has(const ScrStr *s, char c) { return s && memchr(scr_str_flat_view(s)->data, c, scr_str_flat_view(s)->len) != NULL; }
 
 static ScrStr *lu_cat(const ScrStr *a, const ScrStr *b) {
   ScrJsonBuf out;
@@ -79,8 +79,8 @@ static bool lu_hostless_protocol(const ScrStr *p) {
 /* UTF-16 length of a UTF-8 (WTF-8) span: 4-byte sequences are pairs. */
 static size_t lu_utf16_len(const ScrStr *s) {
   size_t n = 0;
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     if ((c & 0xC0) != 0x80) n += c >= 0xF0 ? 2 : 1;
   }
   return n;
@@ -193,7 +193,7 @@ static const signed char lu_no_escape_auth[128] = {
 static ScrStr *lu_encode_auth(const ScrStr *s) { return scr_qs_encode_str(s, lu_no_escape_auth); }
 
 static bool lu_ipv6_hostname(const ScrStr *h) {
-  return h && h->len > 0 && h->data[0] == '[' && h->data[h->len - 1] == ']';
+  return h && scr_str_flat_view(h)->len > 0 && scr_str_flat_view(h)->data[0] == '[' && scr_str_flat_view(h)->data[scr_str_flat_view(h)->len - 1] == ']';
 }
 
 /* Url.prototype.format. `query` is querystring.stringify of an object
@@ -214,7 +214,7 @@ static ScrStr *lu_format(const LegacyUrl *u, const ScrStr *query) {
   scr_jb_init(&protocol);
   if (lu_truthy(u->protocol)) {
     scr_jb_put_str(&protocol, u->protocol);
-    if (u->protocol->data[u->protocol->len - 1] != ':') scr_jb_putc(&protocol, ':');
+    if (scr_str_flat_view(u->protocol)->data[scr_str_flat_view(u->protocol)->len - 1] != ':') scr_jb_putc(&protocol, ':');
   }
   ScrStr *proto = scr_jb_finish(&protocol);
 
@@ -241,8 +241,8 @@ static ScrStr *lu_format(const LegacyUrl *u, const ScrStr *query) {
   ScrJsonBuf pathname;
   scr_jb_init(&pathname);
   if (lu_truthy(u->pathname)) {
-    for (size_t i = 0; i < u->pathname->len; i++) {
-      char c = u->pathname->data[i];
+    for (size_t i = 0; i < scr_str_flat_view(u->pathname)->len; i++) {
+      char c = scr_str_flat_view(u->pathname)->data[i];
       if (c == '#') scr_jb_puts(&pathname, "%23");
       else if (c == '?') scr_jb_puts(&pathname, "%3F");
       else scr_jb_putc(&pathname, c);
@@ -254,11 +254,11 @@ static ScrStr *lu_format(const LegacyUrl *u, const ScrStr *query) {
   scr_jb_init(&out);
   scr_jb_put_str(&out, proto);
   if (u->slashes || lu_slashed_protocol(proto)) {
-    if (u->slashes || host_part->len > 0) {
+    if (u->slashes || scr_str_flat_view(host_part)->len > 0) {
       scr_jb_puts(&out, "//");
       scr_jb_put_str(&out, host_part);
-      if (path->len > 0 && path->data[0] != '/') scr_jb_putc(&out, '/');
-    } else if (proto->len >= 4 && memcmp(proto->data, "file", 4) == 0) {
+      if (scr_str_flat_view(path)->len > 0 && scr_str_flat_view(path)->data[0] != '/') scr_jb_putc(&out, '/');
+    } else if (scr_str_flat_view(proto)->len >= 4 && memcmp(scr_str_flat_view(proto)->data, "file", 4) == 0) {
       scr_jb_puts(&out, "//");
     }
   } else {
@@ -267,14 +267,14 @@ static ScrStr *lu_format(const LegacyUrl *u, const ScrStr *query) {
   scr_jb_put_str(&out, path);
   if (search_src || lu_truthy(query)) {
     const ScrStr *search = search_src ? search_src : query;
-    if (!search_src || search->data[0] != '?') scr_jb_putc(&out, '?');
-    for (size_t i = 0; i < search->len; i++) {
-      if (search->data[i] == '#') scr_jb_puts(&out, "%23");
-      else scr_jb_putc(&out, search->data[i]);
+    if (!search_src || scr_str_flat_view(search)->data[0] != '?') scr_jb_putc(&out, '?');
+    for (size_t i = 0; i < scr_str_flat_view(search)->len; i++) {
+      if (scr_str_flat_view(search)->data[i] == '#') scr_jb_puts(&out, "%23");
+      else scr_jb_putc(&out, scr_str_flat_view(search)->data[i]);
     }
   }
   if (lu_truthy(u->hash)) {
-    if (u->hash->data[0] != '#') scr_jb_putc(&out, '#');
+    if (scr_str_flat_view(u->hash)->data[0] != '#') scr_jb_putc(&out, '#');
     scr_jb_put_str(&out, u->hash);
   }
   scr_str_release(proto);
@@ -312,8 +312,8 @@ static const char *const lu_auto_escape[126] = {
 };
 
 static bool lu_host_forbidden(const ScrStr *h, bool ipv6) {
-  for (size_t i = 0; i < h->len; i++) {
-    switch (h->data[i]) {
+  for (size_t i = 0; i < scr_str_flat_view(h)->len; i++) {
+    switch (scr_str_flat_view(h)->data[i]) {
       case '\0': case '\t': case '\n': case '\r': case ' ': case '#': case '%': case '/':
       case '<': case '>': case '?': case '@': case '\\': case '^': case '|':
         return true;
@@ -330,8 +330,8 @@ static bool lu_host_forbidden(const ScrStr *h, bool ipv6) {
 /* Url.prototype.parse(url, parseQueryString, slashesDenoteHost) over an
  * empty record. False with an error pending. */
 static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool slashes_denote_host) {
-  const char *s = url->data;
-  size_t n = url->len;
+  const char *s = scr_str_flat_view(url)->data;
+  size_t n = scr_str_flat_view(url)->len;
   /* Trim (C0 controls, space, U+00A0, U+FEFF) and turn backslashes before
    * the first ? or # into slashes. */
   bool has_hash = false, has_at = false;
@@ -391,7 +391,7 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
   }
   ScrStr *rest_str = scr_jb_finish(&restb);
   LuSpan rest = {0};
-  lu_span_set(&rest, rest_str->data, rest_str->len);
+  lu_span_set(&rest, scr_str_flat_view(rest_str)->data, scr_str_flat_view(rest_str)->len);
 
   if (!slashes_denote_host && !has_hash && !has_at) {
     /* simplePathPattern: /^(\/\/?(?!\/)[^?\s]*)(\?[^\s]*)?$/ */
@@ -532,14 +532,14 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
     /* parseHost: portPattern /:[0-9]*$/ */
     {
       const ScrStr *h = self->host;
-      size_t k = h->len;
-      while (k > 0 && h->data[k - 1] >= '0' && h->data[k - 1] <= '9') k--;
-      size_t host_len = h->len;
-      if (k > 0 && h->data[k - 1] == ':') {
-        if (h->len - k > 0) self->port = lu_str(h->data + k, h->len - k);
+      size_t k = scr_str_flat_view(h)->len;
+      while (k > 0 && scr_str_flat_view(h)->data[k - 1] >= '0' && scr_str_flat_view(h)->data[k - 1] <= '9') k--;
+      size_t host_len = scr_str_flat_view(h)->len;
+      if (k > 0 && scr_str_flat_view(h)->data[k - 1] == ':') {
+        if (scr_str_flat_view(h)->len - k > 0) self->port = lu_str(scr_str_flat_view(h)->data + k, scr_str_flat_view(h)->len - k);
         host_len = k - 1;
       }
-      if (host_len > 0) self->hostname = lu_str(h->data, host_len);
+      if (host_len > 0) self->hostname = lu_str(scr_str_flat_view(h)->data, host_len);
     }
     if (!self->hostname) self->hostname = lu_str("", 0);
 
@@ -548,8 +548,8 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
       /* getHostname: a character no hostname may hold moves the remainder
        * into the path (only ':' can still appear here). */
       const ScrStr *h = self->hostname;
-      for (size_t i = 0; i < h->len; i++) {
-        char c = h->data[i];
+      for (size_t i = 0; i < scr_str_flat_view(h)->len; i++) {
+        char c = scr_str_flat_view(h)->data[i];
         if (c != '/' && c != '\\' && c != '#' && c != '?' && c != ':') continue;
         if (c == ':' && !lu_port_warned) {
           lu_port_warned = true;
@@ -565,12 +565,12 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
         ScrJsonBuf moved;
         scr_jb_init(&moved);
         scr_jb_putc(&moved, '/');
-        scr_jb_write(&moved, h->data + i, h->len - i);
+        scr_jb_write(&moved, scr_str_flat_view(h)->data + i, scr_str_flat_view(h)->len - i);
         scr_jb_write(&moved, rest.p, rest.n);
         ScrStr *joined = scr_jb_finish(&moved);
-        lu_span_set(&rest, joined->data, joined->len);
+        lu_span_set(&rest, scr_str_flat_view(joined)->data, scr_str_flat_view(joined)->len);
         scr_str_release(joined);
-        lu_set(&self->hostname, lu_str(h->data, i));
+        lu_set(&self->hostname, lu_str(scr_str_flat_view(h)->data, i));
         break;
       }
     }
@@ -579,7 +579,7 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
     } else {
       lu_set(&self->hostname, scr_str_to_lower(self->hostname));
     }
-    if (self->hostname->len > 0) {
+    if (scr_str_flat_view(self->hostname)->len > 0) {
       if (ipv6) {
         if (lu_host_forbidden(self->hostname, true)) {
           lu_throw_invalid_url();
@@ -587,9 +587,9 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
           goto done;
         }
       } else {
-        ScrStr *ascii = scr_idna_to_ascii(self->hostname->data, self->hostname->len);
+        ScrStr *ascii = scr_idna_to_ascii(scr_str_flat_view(self->hostname)->data, scr_str_flat_view(self->hostname)->len);
         lu_set(&self->hostname, ascii);
-        if (ascii->len == 0 || lu_host_forbidden(ascii, false)) {
+        if (scr_str_flat_view(ascii)->len == 0 || lu_host_forbidden(ascii, false)) {
           lu_throw_invalid_url();
           failed = true;
           goto done;
@@ -608,7 +608,7 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
     }
     if (ipv6) {
       const ScrStr *h = self->hostname;
-      lu_set(&self->hostname, lu_str(h->data + 1, h->len >= 2 ? h->len - 2 : 0));
+      lu_set(&self->hostname, lu_str(scr_str_flat_view(h)->data + 1, scr_str_flat_view(h)->len >= 2 ? scr_str_flat_view(h)->len - 2 : 0));
       if (rest.n == 0 || rest.p[0] != '/') {
         char *grown = malloc(rest.n + 1);
         if (!grown) scr_trap("scriptc: out of memory\n");
@@ -637,7 +637,7 @@ static bool lu_parse(LegacyUrl *self, const ScrStr *url, bool parse_query, bool 
         else scr_jb_write(&esc, rest.p + i, 1);
       }
       ScrStr *escaped = scr_jb_finish(&esc);
-      lu_span_set(&rest, escaped->data, escaped->len);
+      lu_span_set(&rest, scr_str_flat_view(escaped)->data, scr_str_flat_view(escaped)->len);
       scr_str_release(escaped);
     }
   }
@@ -818,7 +818,7 @@ static ScrStr *lu_format_whatwg(ScrUrl *url, const ScrDyn *options) {
   if (!search) copy.query = empty;
   if (!auth) copy.userinfo = empty;
   if (unicode && copy.has_authority) {
-    host = scr_idna_to_unicode(copy.host->data, copy.host->len);
+    host = scr_idna_to_unicode(scr_str_flat_view(copy.host)->data, scr_str_flat_view(copy.host)->len);
     copy.host = host;
   }
   ScrStr *out = scr_url_href(&copy);
@@ -919,7 +919,7 @@ static ScrDyn *lu_proto_fenced(const char *method) {
   scr_jb_puts(&message, method);
   scr_jb_puts(&message, " has no lowering; use url.parse, url.format or url.resolve");
   ScrStr *text = scr_jb_finish(&message);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, text->data, text->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "SC2020");
   scr_str_release(text);
   return NULL;
 }
@@ -1006,9 +1006,9 @@ static void lp_free(LuPath *p) {
 }
 static void lp_split(LuPath *p, const ScrStr *s) {
   size_t start = 0;
-  for (size_t i = 0; i <= s->len; i++) {
-    if (i == s->len || s->data[i] == '/') {
-      lp_push(p, lu_str(s->data + start, i - start));
+  for (size_t i = 0; i <= scr_str_flat_view(s)->len; i++) {
+    if (i == scr_str_flat_view(s)->len || scr_str_flat_view(s)->data[i] == '/') {
+      lp_push(p, lu_str(scr_str_flat_view(s)->data + start, i - start));
       start = i + 1;
     }
   }
@@ -1032,15 +1032,15 @@ static void lu_set_path(LegacyUrl *r) {
 /* Splits "auth@host[@...]" stuck in the host (mailto:-style resolutions). */
 static void lu_auth_in_host(LegacyUrl *r) {
   if (!lu_truthy(r->host)) return;
-  const char *at = memchr(r->host->data, '@', r->host->len);
-  if (!at || at == r->host->data) return;
-  size_t first = (size_t)(at - r->host->data);
+  const char *at = memchr(scr_str_flat_view(r->host)->data, '@', scr_str_flat_view(r->host)->len);
+  if (!at || at == scr_str_flat_view(r->host)->data) return;
+  size_t first = (size_t)(at - scr_str_flat_view(r->host)->data);
   const char *rest = at + 1;
-  size_t rest_len = r->host->len - first - 1;
+  size_t rest_len = scr_str_flat_view(r->host)->len - first - 1;
   const char *next = memchr(rest, '@', rest_len);
   size_t second = next ? (size_t)(next - rest) : rest_len;
   ScrStr *host = lu_str(rest, second);
-  lu_set(&r->auth, lu_str(r->host->data, first));
+  lu_set(&r->auth, lu_str(scr_str_flat_view(r->host)->data, first));
   lu_set(&r->hostname, scr_str_retain(host));
   lu_set(&r->host, host);
 }
@@ -1049,7 +1049,7 @@ static void lu_auth_in_host(LegacyUrl *r) {
 static void lu_resolve_object(LegacyUrl *result, const LegacyUrl *self, LegacyUrl *rel) {
   lu_copy(result, self);
   lu_set(&result->hash, lu_ref(rel->hash));
-  if (rel->href && rel->href->len == 0) return;
+  if (rel->href && scr_str_flat_view(rel->href)->len == 0) return;
   if (rel->slashes && !lu_truthy(rel->protocol)) {
     ScrStr *protocol = lu_ref(result->protocol);
     lu_copy(result, rel);
@@ -1097,8 +1097,8 @@ static void lu_resolve_object(LegacyUrl *result, const LegacyUrl *self, LegacyUr
     return;
   }
 
-  bool is_source_abs = lu_truthy(result->pathname) && result->pathname->data[0] == '/';
-  bool is_rel_abs = lu_truthy(rel->host) || (lu_truthy(rel->pathname) && rel->pathname->data[0] == '/');
+  bool is_source_abs = lu_truthy(result->pathname) && scr_str_flat_view(result->pathname)->data[0] == '/';
+  bool is_rel_abs = lu_truthy(rel->host) || (lu_truthy(rel->pathname) && scr_str_flat_view(rel->pathname)->data[0] == '/');
   bool must_end_abs = is_rel_abs || is_source_abs || (lu_truthy(result->host) && lu_truthy(rel->pathname));
   bool remove_all_dots = must_end_abs;
   LuPath src_path = {0}, rel_path = {0};
@@ -1199,15 +1199,15 @@ static void lu_resolve_object(LegacyUrl *result, const LegacyUrl *self, LegacyUr
     for (; up; up--) lp_unshift(&src_path, lu_str("..", 2));
   }
   if (must_end_abs && !lp_first_is(&src_path, "") &&
-      (src_path.len == 0 || src_path.items[0]->len == 0 || src_path.items[0]->data[0] != '/'))
+      (src_path.len == 0 || scr_str_flat_view(src_path.items[0])->len == 0 || scr_str_flat_view(src_path.items[0])->data[0] != '/'))
     lp_unshift(&src_path, lu_str("", 0));
   if (has_trailing_slash) {
     ScrStr *joined = lp_join(&src_path);
-    if (joined->len == 0 || joined->data[joined->len - 1] != '/') lp_push(&src_path, lu_str("", 0));
+    if (scr_str_flat_view(joined)->len == 0 || scr_str_flat_view(joined)->data[scr_str_flat_view(joined)->len - 1] != '/') lp_push(&src_path, lu_str("", 0));
     scr_str_release(joined);
   }
   bool is_absolute = lp_first_is(&src_path, "") ||
-                     (src_path.len > 0 && src_path.items[0]->len > 0 && src_path.items[0]->data[0] == '/');
+                     (src_path.len > 0 && scr_str_flat_view(src_path.items[0])->len > 0 && scr_str_flat_view(src_path.items[0])->data[0] == '/');
   if (no_leading_slashes) {
     ScrStr *host = is_absolute ? lu_str("", 0) : src_path.len ? lp_shift(&src_path) : lu_str("", 0);
     lu_set(&result->hostname, scr_str_retain(host));
@@ -1486,15 +1486,15 @@ static ScrStr *lu_host_parse(const char *p, size_t n) {
     return scr_jb_finish(&out);
   }
   ScrStr *decoded = lu_percent_decode(p, n);
-  ScrStr *ascii = scr_idna_to_ascii(decoded->data, decoded->len);
+  ScrStr *ascii = scr_idna_to_ascii(scr_str_flat_view(decoded)->data, scr_str_flat_view(decoded)->len);
   scr_str_release(decoded);
-  if (ascii->len == 0 || lu_domain_forbidden(ascii->data, ascii->len)) {
+  if (scr_str_flat_view(ascii)->len == 0 || lu_domain_forbidden(scr_str_flat_view(ascii)->data, scr_str_flat_view(ascii)->len)) {
     scr_str_release(ascii);
     scr_str_release(scr_jb_finish(&out));
     return NULL;
   }
-  if (lu_ends_in_number(ascii->data, ascii->len)) {
-    bool ok = lu_parse_ipv4(ascii->data, ascii->len, &out);
+  if (lu_ends_in_number(scr_str_flat_view(ascii)->data, scr_str_flat_view(ascii)->len)) {
+    bool ok = lu_parse_ipv4(scr_str_flat_view(ascii)->data, scr_str_flat_view(ascii)->len, &out);
     scr_str_release(ascii);
     if (!ok) {
       scr_str_release(scr_jb_finish(&out));
@@ -1510,13 +1510,13 @@ static ScrStr *lu_host_parse(const char *p, size_t n) {
  * parser over the input up to the first delimiter, or NULL when the setter
  * fails. */
 static ScrStr *lu_set_hostname(const ScrStr *input) {
-  const char *hash = memchr(input->data, '#', input->len);
-  size_t n = hash ? (size_t)(hash - input->data) : input->len;
+  const char *hash = memchr(scr_str_flat_view(input)->data, '#', scr_str_flat_view(input)->len);
+  size_t n = hash ? (size_t)(hash - scr_str_flat_view(input)->data) : scr_str_flat_view(input)->len;
   char *host = malloc(n ? n : 1);
   if (!host) scr_trap("scriptc: out of memory\n");
   size_t len = 0;
   for (size_t i = 0; i < n; i++) {
-    char c = input->data[i];
+    char c = scr_str_flat_view(input)->data[i];
     if (c != '\t' && c != '\n' && c != '\r') host[len++] = c;
   }
   size_t location = len;
@@ -1555,7 +1555,7 @@ static ScrStr *lu_domain_input(const ScrDyn *domain, bool missing) {
 ScrStr *scr_url_domain_to_ascii(const ScrDyn *domain, bool missing) {
   ScrStr *input = lu_domain_input(domain, missing);
   if (!input) return NULL;
-  ScrStr *host = input->len ? lu_set_hostname(input) : NULL;
+  ScrStr *host = scr_str_flat_view(input)->len ? lu_set_hostname(input) : NULL;
   scr_str_release(input);
   return host ? host : lu_str("", 0);
 }
@@ -1563,10 +1563,10 @@ ScrStr *scr_url_domain_to_ascii(const ScrDyn *domain, bool missing) {
 ScrStr *scr_url_domain_to_unicode(const ScrDyn *domain, bool missing) {
   ScrStr *input = lu_domain_input(domain, missing);
   if (!input) return NULL;
-  ScrStr *host = input->len ? lu_set_hostname(input) : NULL;
+  ScrStr *host = scr_str_flat_view(input)->len ? lu_set_hostname(input) : NULL;
   scr_str_release(input);
   if (!host) return lu_str("", 0);
-  ScrStr *out = scr_idna_to_unicode(host->data, host->len);
+  ScrStr *out = scr_idna_to_unicode(scr_str_flat_view(host)->data, scr_str_flat_view(host)->len);
   scr_str_release(host);
   return out;
 }

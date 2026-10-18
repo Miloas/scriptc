@@ -363,7 +363,7 @@ static void scr_rl_feed_bytes(ScrRl *rl, const char *p, size_t n) {
   memcpy(rl->held, all + total - tail, tail);
   ScrStr *text = scr_str_from_utf8_lossy(all, total - tail);
   free(all);
-  scr_rl_feed_text(rl, text->data, text->len);
+  scr_rl_feed_text(rl, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
   scr_str_release(text);
 }
 
@@ -398,7 +398,7 @@ void scr_rl_input_bytes(double id, ScrBytes *chunk) {
 void scr_rl_input_str(double id, ScrStr *chunk) {
   ScrRl *rl = scr_rl_find(id);
   if (!rl || rl->closed) return;
-  scr_rl_feed_text(rl, chunk->data, chunk->len);
+  scr_rl_feed_text(rl, scr_str_flat_view(chunk)->data, scr_str_flat_view(chunk)->len);
 }
 
 void scr_rl_input_end(double id) {
@@ -1028,7 +1028,7 @@ void scr_rl_write_key(double id, bool has_data, ScrStr *data, bool has_key, bool
     scr_rl_tty_ops->write_key(rl, has_data ? data : NULL, has_key, has_name ? name : NULL, ctrl,
                               meta, shift);
   } else if (has_data) {
-    scr_rl_feed_text(rl, data->data, data->len);
+    scr_rl_feed_text(rl, scr_str_flat_view(data)->data, scr_str_flat_view(data)->len);
   }
 }
 
@@ -1043,7 +1043,7 @@ void scr_rl_write(double id, ScrStr *data) {
   if (rl->paused) scr_rl_do_resume(rl);
   if (scr_exc_pending()) return;
   if (rl->tty) scr_rl_tty_ops->write(rl, data); /* kTtyWrite(d) */
-  else scr_rl_feed_text(rl, data->data, data->len);
+  else scr_rl_feed_text(rl, scr_str_flat_view(data)->data, scr_str_flat_view(data)->len);
 }
 
 /* on/once for 'line' (fn: the line adapter), 'close', 'pause', 'resume'
@@ -1295,9 +1295,9 @@ static void scr_rl_ui_push(ScrRlUi *u, ScrStr *data) {
     scr_next_tick(job);
     return;
   }
-  u->todo = scr_rl_grow(u->todo, &u->todo_cap, u->todo_len + data->len, 1);
-  memcpy(u->todo + u->todo_len, data->data, data->len);
-  u->todo_len += data->len;
+  u->todo = scr_rl_grow(u->todo, &u->todo_cap, u->todo_len + scr_str_flat_view(data)->len, 1);
+  memcpy(u->todo + u->todo_len, scr_str_flat_view(data)->data, scr_str_flat_view(data)->len);
+  u->todo_len += scr_str_flat_view(data)->len;
   scr_str_release(data);
 }
 

@@ -130,8 +130,9 @@ export function emitDynamicExpr(
       const calleeName = (): string => {
         if (e.calleeNameValue === undefined) return host.cstr(e.calleeName);
         const name = emitBorrowedInput(host, e.calleeNameValue);
+        const flat = host.flatStringIn(B, name.name);
         const data = B.tmp();
-        B.line(`${data} = getelementptr inbounds %ScrStr, ptr ${name.name}, i32 1`);
+        B.line(`${data} = getelementptr inbounds %ScrStr, ptr ${flat}, i32 1`);
         return data;
       };
       host.declare("declare void @scr_dyn_this_push_dyn(ptr)");
@@ -232,8 +233,9 @@ export function emitDynamicExpr(
       let name = host.cstr(e.calleeName);
       if (e.calleeNameValue !== undefined) {
         const value = emitBorrowedInput(host, e.calleeNameValue);
+        const flat = host.flatStringIn(B, value.name);
         name = B.tmp();
-        B.line(`${name} = getelementptr inbounds %ScrStr, ptr ${value.name}, i32 1`);
+        B.line(`${name} = getelementptr inbounds %ScrStr, ptr ${flat}, i32 1`);
       }
       const t = B.tmp();
       B.line(

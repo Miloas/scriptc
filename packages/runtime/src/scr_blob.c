@@ -128,20 +128,20 @@ static ScrStr *scr_blob_to_string(const ScrDyn *value) { return scr_dyn_string_c
 /* The type rule: any character outside U+0020..U+007E clears the type,
  * otherwise it is lowercased. Consumes s. */
 static ScrStr *scr_blob_type_of(ScrStr *s) {
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     if (c < 0x20 || c > 0x7e) {
       scr_str_release(s);
       return scr_str_new("", 0);
     }
   }
-  char *lower = malloc(s->len + 1);
+  char *lower = malloc(scr_str_flat_view(s)->len + 1);
   if (!lower) scr_trap("scriptc: out of memory\n");
-  for (size_t i = 0; i < s->len; i++) {
-    char c = s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    char c = scr_str_flat_view(s)->data[i];
     lower[i] = c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
   }
-  ScrStr *out = scr_str_new(lower, s->len);
+  ScrStr *out = scr_str_new(lower, scr_str_flat_view(s)->len);
   free(lower);
   scr_str_release(s);
   return out;
@@ -184,23 +184,23 @@ static bool scr_blob_add_source(ScrBlobBuild *bb, const ScrDyn *source, bool nat
     /* Node's /\r\n|\r|\n/g: CRLF, a lone CR and a lone LF each become one
      * platform line break. */
     size_t run = 0;
-    for (size_t i = 0; i < well->len;) {
-      size_t skip = well->data[i] == '\n'   ? 1
-                    : well->data[i] != '\r' ? 0
-                    : i + 1 < well->len && well->data[i + 1] == '\n' ? 2
+    for (size_t i = 0; i < scr_str_flat_view(well)->len;) {
+      size_t skip = scr_str_flat_view(well)->data[i] == '\n'   ? 1
+                    : scr_str_flat_view(well)->data[i] != '\r' ? 0
+                    : i + 1 < scr_str_flat_view(well)->len && scr_str_flat_view(well)->data[i + 1] == '\n' ? 2
                                                                      : 1;
       if (skip == 0) {
         i++;
         continue;
       }
-      scr_blob_build_bytes(bb, (const uint8_t *)well->data + run, i - run);
+      scr_blob_build_bytes(bb, (const uint8_t *)scr_str_flat_view(well)->data + run, i - run);
       scr_blob_build_bytes(bb, (const uint8_t *)eol, sizeof eol - 1);
       i += skip;
       run = i;
     }
-    scr_blob_build_bytes(bb, (const uint8_t *)well->data + run, well->len - run);
+    scr_blob_build_bytes(bb, (const uint8_t *)scr_str_flat_view(well)->data + run, scr_str_flat_view(well)->len - run);
   } else {
-    scr_blob_build_bytes(bb, (const uint8_t *)well->data, well->len);
+    scr_blob_build_bytes(bb, (const uint8_t *)scr_str_flat_view(well)->data, scr_str_flat_view(well)->len);
   }
   scr_blob_build_part(bb, bb->len - start);
   scr_str_release(well);
@@ -336,8 +336,8 @@ static ScrBlob *scr_blob_construct(const ScrDyn *sources, const ScrDyn *options)
   if (!scr_blob_absent(endings_raw)) {
     ScrStr *endings = scr_blob_to_string(endings_raw);
     if (!endings) goto fail;
-    bool transparent = endings->len == 11 && memcmp(endings->data, "transparent", 11) == 0;
-    native = endings->len == 6 && memcmp(endings->data, "native", 6) == 0;
+    bool transparent = scr_str_flat_view(endings)->len == 11 && memcmp(scr_str_flat_view(endings)->data, "transparent", 11) == 0;
+    native = scr_str_flat_view(endings)->len == 6 && memcmp(scr_str_flat_view(endings)->data, "native", 6) == 0;
     if (!transparent && !native) {
       ScrDyn *shown = scr_dyn_new_str(endings);
       scr_str_release(endings);

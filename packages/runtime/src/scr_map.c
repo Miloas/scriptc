@@ -73,15 +73,16 @@ static inline uint64_t scr_map_hash_bytes(const char *bytes, size_t length) {
  * the byte walk. Immortal strings may live in read-only memory and are
  * shared by every thread, so they are never written. */
 static inline uint64_t scr_map_hash_str(const ScrStr *k) {
-#if SCR_STR_HASH_CACHE
+#if SCR_STR_HASH_CACHE && !defined(SCR_MAP_NO_HASH_CACHE)
   uint32_t h = k->hash;
   if (__builtin_expect(h != 0, 1)) return scr_map_hash_widen(h);
-  h = scr_map_hash_fold(k->data, k->len);
+  h = scr_map_hash_fold(scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
   /* A scratch slice is a writable stack copy (scr_str_is_scratch). */
   if (k->rc != SIZE_MAX || scr_str_is_scratch(k)) ((ScrStr *)k)->hash = h;
   return scr_map_hash_widen(h);
 #else
-  return scr_map_hash_bytes(k->data, k->len);
+  const ScrStr *flat = scr_str_flat_view(k);
+  return scr_map_hash_bytes(flat->data, flat->len);
 #endif
 }
 
@@ -246,12 +247,12 @@ static inline bool scr_map_lookup_eq(const ScrMap *m, uint64_t stored, uint64_t 
   if (lookup == SCR_MAP_LOOKUP_SPAN) {
     const ScrStr *a = scr_map_slot_to_ptr(stored);
     const ScrMapSpan *b = scr_map_slot_to_ptr(key);
-    return a->len == b->length && scr_key_equal(a->data, b->bytes, a->len);
+    return scr_str_flat_view(a)->len == b->length && scr_key_equal(scr_str_flat_view(a)->data, b->bytes, scr_str_flat_view(a)->len);
   }
   if (lookup == SCR_MAP_LOOKUP_STR) {
     const ScrStr *a = scr_map_slot_to_ptr(stored);
     const ScrStr *b = scr_map_slot_to_ptr(key);
-    return a == b || (a->len == b->len && scr_key_equal(a->data, b->data, a->len));
+    return a == b || (scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && scr_key_equal(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len));
   }
   return scr_map_key_eq(m, stored, key);
 }
@@ -1164,7 +1165,7 @@ static __attribute__((noinline)) const ScrMapEntry *scr_map_entry_str_bytes(cons
                                                                             const ScrStr *key,
                                                                             const ScrMapEntry *e) {
   const ScrStr *stored = scr_map_slot_to_ptr(e->key);
-  if (stored->len == key->len && scr_key_equal(stored->data, key->data, key->len)) return e;
+  if (scr_str_flat_view(stored)->len == scr_str_flat_view(key)->len && scr_key_equal(scr_str_flat_view(stored)->data, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len)) return e;
   return scr_map_entry_str_slow(m, key);
 }
 
@@ -1530,7 +1531,7 @@ void scr_set_add_all(ScrMap *set, ScrArr *values) {
  * zero (except "0" itself), value <= 2^32 - 2. JS orders these OWN keys
  * first, ascending numerically, before every other string key. */
 static bool scr_map_key_array_index(const ScrStr *key, uint32_t *out) {
-  return scr_key_array_index(key->data, key->len, out);
+  return scr_key_array_index(scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, out);
 }
 
 /* Enumerate numeric keys in ascending order, then other keys in insertion

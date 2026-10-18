@@ -83,10 +83,10 @@ static ScrDyn *scr_child_dyn_text_or_null(const char *text) {
  * property, so the node orders them first. */
 static void scr_child_error_spawn_fields(ScrError *e, double uv_errno, const char *verb,
                                          ScrStr *file, ScrArr *args) {
-  size_t cap = strlen(verb) + 1 + file->len + 1;
+  size_t cap = strlen(verb) + 1 + scr_str_flat_view(file)->len + 1;
   char *call = malloc(cap);
   if (!call) scr_trap("scriptc: out of memory\n");
-  int len = snprintf(call, cap, "%s %s", verb, file->data);
+  int len = snprintf(call, cap, "%s %s", verb, scr_str_flat_view(file)->data);
   e->system_errno = uv_errno;
   e->system_call = scr_str_new(call, (size_t)len);
   free(call);
@@ -2999,10 +2999,10 @@ ScrStr *scr_spawn_res_signal(ScrSpawnRes *r) {
  * which nothing narrows on. */
 ScrError *scr_spawn_res_error(ScrSpawnRes *r) {
   if (r->spawn_errname == NULL) return NULL;
-  size_t cap = 10 + (r->cmd ? r->cmd->len : 0) + 1 + strlen(r->spawn_errname) + 1;
+  size_t cap = 10 + (r->cmd ? scr_str_flat_view(r->cmd)->len : 0) + 1 + strlen(r->spawn_errname) + 1;
   char *msg = malloc(cap);
   if (!msg) scr_child_oom();
-  snprintf(msg, cap, "spawnSync %s %s", r->cmd ? r->cmd->data : "", r->spawn_errname);
+  snprintf(msg, cap, "spawnSync %s %s", r->cmd ? scr_str_flat_view(r->cmd)->data : "", r->spawn_errname);
   ScrStr *m = scr_str_new(msg, strlen(msg));
   free(msg);
   ScrError *e = scr_error_new(0 /* Error */, m);
@@ -3022,10 +3022,10 @@ ScrError *scr_spawn_res_error(ScrSpawnRes *r) {
 char **scr_child_argv(ScrStr *cmd, ScrArr *args) {
   size_t start = scr_child_arg_start(cmd, args);
   size_t n = (size_t)scr_arr_len(args) - start;
-  size_t extra = scr_str_has_surrogate(cmd) ? cmd->len + 1 : 0;
+  size_t extra = scr_str_has_surrogate(cmd) ? scr_str_flat_view(cmd)->len + 1 : 0;
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)(i + start));
-    if (scr_str_has_surrogate(s)) extra += s->len + 1;
+    if (scr_str_has_surrogate(s)) extra += scr_str_flat_view(s)->len + 1;
     scr_str_release(s); /* borrow: the array's reference keeps it alive */
   }
   char **argv = malloc((n + 2) * sizeof(char *) + extra);
@@ -3033,12 +3033,12 @@ char **scr_child_argv(ScrStr *cmd, ScrArr *args) {
   char *copies = (char *)(argv + n + 2);
   for (size_t i = 0; i <= n; i++) {
     ScrStr *s = i ? (ScrStr *)scr_arr_get_ref(args, (double)(i - 1 + start)) : scr_str_retain(cmd);
-    argv[i] = s->data;
+    argv[i] = scr_str_flat_view(s)->data;
     if (scr_str_has_surrogate(s)) {
-      memcpy(copies, s->data, s->len + 1);
-      scr_wtf8_to_utf8(copies, s->len);
+      memcpy(copies, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len + 1);
+      scr_wtf8_to_utf8(copies, scr_str_flat_view(s)->len);
       argv[i] = copies;
-      copies += s->len + 1;
+      copies += scr_str_flat_view(s)->len + 1;
     }
     scr_str_release(s);
   }
@@ -3137,7 +3137,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
 
   char **argv = scr_child_argv(cmd, args);
   pid_t pid = -1;
-  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv, environ);
+  int spawn_err = posix_spawnp(&pid, scr_str_flat_view(cmd)->data, &fa, NULL, argv, environ);
   posix_spawn_file_actions_destroy(&fa);
   free(argv);
   if (cap_out) close(outfd[1]);
@@ -3251,7 +3251,7 @@ ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
                                   ScrStr *killsignal, double in_mode,
                                   double out_mode, double err_mode) {
   int killsig = SIGTERM;
-  if (killsignal->len > 0) {
+  if (scr_str_flat_view(killsignal)->len > 0) {
     int resolved = scr_signal_from_name(killsignal);
     if (resolved > 0) killsig = resolved;
   }
@@ -3266,9 +3266,9 @@ ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
 ScrSpawnRes *scr_spawn_sync_stdio_str(ScrStr *cmd, ScrArr *args, double timeout_ms,
                                        ScrStr *killsignal, ScrStr *stdio) {
   double in_mode = 0, out_mode = 0, err_mode = 0; /* "pipe": the defaults */
-  if (stdio->len == 7 && memcmp(stdio->data, "inherit", 7) == 0) {
+  if (scr_str_flat_view(stdio)->len == 7 && memcmp(scr_str_flat_view(stdio)->data, "inherit", 7) == 0) {
     in_mode = 2; out_mode = 2; err_mode = 2;
-  } else if (stdio->len == 6 && memcmp(stdio->data, "ignore", 6) == 0) {
+  } else if (scr_str_flat_view(stdio)->len == 6 && memcmp(scr_str_flat_view(stdio)->data, "ignore", 6) == 0) {
     out_mode = 1; err_mode = 1;
   }
   return scr_spawn_sync_opts(cmd, args, timeout_ms, killsignal, in_mode, out_mode, err_mode);
@@ -3323,28 +3323,28 @@ typedef struct {
 static char *scr_exec_display(ScrStr *cmd, ScrArr *args, bool shell) {
   if (shell) {
     ScrStr *c = (ScrStr *)scr_arr_get_ref(args, 1); /* ["-c", cmd] */
-    char *out = malloc(c->len + 1);
+    char *out = malloc(scr_str_flat_view(c)->len + 1);
     if (!out) scr_child_oom();
-    memcpy(out, c->data, c->len + 1);
+    memcpy(out, scr_str_flat_view(c)->data, scr_str_flat_view(c)->len + 1);
     scr_str_release(c);
     return out;
   }
   size_t n = (size_t)scr_arr_len(args);
-  size_t total = cmd->len;
+  size_t total = scr_str_flat_view(cmd)->len;
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)i);
-    total += 1 + s->len;
+    total += 1 + scr_str_flat_view(s)->len;
     scr_str_release(s);
   }
   char *out = malloc(total + 1);
   if (!out) scr_child_oom();
-  memcpy(out, cmd->data, cmd->len);
-  size_t at = cmd->len;
+  memcpy(out, scr_str_flat_view(cmd)->data, scr_str_flat_view(cmd)->len);
+  size_t at = scr_str_flat_view(cmd)->len;
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)i);
     out[at++] = ' ';
-    memcpy(out + at, s->data, s->len);
-    at += s->len;
+    memcpy(out + at, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+    at += scr_str_flat_view(s)->len;
     scr_str_release(s);
   }
   out[at] = '\0';
@@ -3360,12 +3360,12 @@ static char **scr_exec_envp(ScrArr *pairs) {
   for (size_t i = 0; i < n; i++) {
     ScrStr *k = (ScrStr *)scr_arr_get_ref(pairs, (double)(2 * i));
     ScrStr *v = (ScrStr *)scr_arr_get_ref(pairs, (double)(2 * i + 1));
-    char *kv = malloc(k->len + 1 + v->len + 1);
+    char *kv = malloc(scr_str_flat_view(k)->len + 1 + scr_str_flat_view(v)->len + 1);
     if (!kv) scr_child_oom();
-    memcpy(kv, k->data, k->len);
-    kv[k->len] = '=';
-    memcpy(kv + k->len + 1, v->data, v->len + 1);
-    if (!k->ascii || !v->ascii) scr_wtf8_to_utf8(kv, k->len + 1 + v->len);
+    memcpy(kv, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
+    kv[scr_str_flat_view(k)->len] = '=';
+    memcpy(kv + scr_str_flat_view(k)->len + 1, scr_str_flat_view(v)->data, scr_str_flat_view(v)->len + 1);
+    if (!k->ascii || !v->ascii) scr_wtf8_to_utf8(kv, scr_str_flat_view(k)->len + 1 + scr_str_flat_view(v)->len);
     envp[i] = kv;
     scr_str_release(k);
     scr_str_release(v);
@@ -3410,10 +3410,10 @@ static ScrError *scr_exec_failed_error(const char *display, const ScrCapBuf *err
 static ScrError *scr_exec_spawn_error(ScrStr *cmd, ScrArr *args, int errnum, bool async_shape) {
   const char *errname = scr_errname(errnum);
   const char *verb = async_shape ? "spawn" : "spawnSync";
-  size_t cap = 10 + cmd->len + 1 + strlen(errname) + 1;
+  size_t cap = 10 + scr_str_flat_view(cmd)->len + 1 + strlen(errname) + 1;
   char *msg = malloc(cap);
   if (!msg) scr_child_oom();
-  int len = snprintf(msg, cap, "%s %s %s", verb, cmd->data, errname);
+  int len = snprintf(msg, cap, "%s %s %s", verb, scr_str_flat_view(cmd)->data, errname);
   ScrStr *message = scr_str_new(msg, (size_t)len);
   free(msg);
   ScrError *e = scr_error_new(SCR_ERR_ERROR, message);
@@ -3469,14 +3469,14 @@ ScrStr *scr_exec_sync_core(ScrStr *cmd, ScrArr *args, const ScrExecOpts *o) {
   } /* mode 3 (inherit): the child keeps the parent's fd 2 */
 #if defined(__APPLE__) || defined(__GLIBC__) || defined(SCR_MUSL)
   if (o->cwd != NULL) {
-    posix_spawn_file_actions_addchdir_np(&fa, o->cwd->data);
+    posix_spawn_file_actions_addchdir_np(&fa, scr_str_flat_view(o->cwd)->data);
   }
 #endif
 
   char **argv = scr_child_argv(cmd, args);
   char **envp = o->env_pairs != NULL ? scr_exec_envp(o->env_pairs) : NULL;
   pid_t pid = -1;
-  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv,
+  int spawn_err = posix_spawnp(&pid, scr_str_flat_view(cmd)->data, &fa, NULL, argv,
                                envp != NULL ? envp : environ);
   posix_spawn_file_actions_destroy(&fa);
   free(argv);
@@ -3553,13 +3553,13 @@ ScrStr *scr_exec_sync_core(ScrStr *cmd, ScrArr *args, const ScrExecOpts *o) {
           close(infd[1]);
           in_open = false; /* child closed stdin early: fine, like Node */
         } else if (fds[i].revents & POLLOUT) {
-          ssize_t wrote = write(infd[1], input + in_at, o->input->len - in_at);
+          ssize_t wrote = write(infd[1], input + in_at, scr_str_flat_view(o->input)->len - in_at);
           if (wrote > 0) in_at += (size_t)wrote;
           else if (wrote < 0 && errno != EINTR && errno != EAGAIN) {
             close(infd[1]);
             in_open = false;
           }
-          if (in_at >= o->input->len) {
+          if (in_at >= scr_str_flat_view(o->input)->len) {
             close(infd[1]);
             in_open = false;
           }
@@ -3667,7 +3667,7 @@ ScrStr *scr_exec_sync(ScrStr *cmd, ScrArr *args, bool shell, ScrStr *input,
   ScrExecOpts o = {
       .shell = shell,
       .input = has_input ? input : NULL,
-      .cwd = cwd->len > 0 ? cwd : NULL,
+      .cwd = scr_str_flat_view(cwd)->len > 0 ? cwd : NULL,
       .env_pairs = has_env ? env_pairs : NULL,
       .timeout_ms = timeout_ms,
       /* stdio "inherit"'s stdin rides bit 4 of stdout_mode (the libCall
@@ -3692,7 +3692,7 @@ ScrSpawnRes *scr_exec_capture(ScrStr *cmd, ScrArr *args, bool shell, ScrStr *cwd
   ScrExecOpts o = {
       .shell = shell,
       .input = NULL,
-      .cwd = cwd->len > 0 ? cwd : NULL,
+      .cwd = scr_str_flat_view(cwd)->len > 0 ? cwd : NULL,
       .env_pairs = has_env ? env_pairs : NULL,
       .timeout_ms = timeout_ms,
       .stdout_mode = 1,
@@ -4266,7 +4266,7 @@ static void scr_child_stream_finish(ScrChildStream *s, bool fire_end) {
   if (fire_end && s->encoding != NULL && s->n_data > 0) {
     ScrStr *tail = scr_strdec_end(s->encoding, s->dec_pending);
     s->dec_pending = 0;
-    if (tail->len > 0) scr_child_stream_emit_posix(s, NULL, tail);
+    if (scr_str_flat_view(tail)->len > 0) scr_child_stream_emit_posix(s, NULL, tail);
     scr_str_release(tail);
     if (scr_exc_pending()) fire_end = false;
   }
@@ -4325,7 +4325,7 @@ static bool scr_child_stream_pump(ScrChildStream *s) {
       text = scr_strdec_write(s->encoding, s->dec_pending, chunk);
       s->dec_pending = scr_strdec_next(s->encoding, s->dec_pending, chunk);
     }
-    if (text == NULL || text->len > 0) {
+    if (text == NULL || scr_str_flat_view(text)->len > 0) {
       scr_child_stream_emit_posix(s, text == NULL ? chunk : NULL, text);
     }
     scr_str_release(text);
@@ -4742,7 +4742,7 @@ static bool scr_child_writer_write(ScrChildWriter *w, const void *data,
 bool scr_child_writer_write_string(ScrChildWriter *w, const ScrStr *data) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  bool r = scr_child_writer_write(w, bytes, data->len);
+  bool r = scr_child_writer_write(w, bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
   return r;
 }
@@ -4871,7 +4871,7 @@ static void scr_child_writer_fire_error(ScrChildWriter *w) {
   w->error_pending = false;
   if (w->n_write_err == 0) {
     fflush(stdout);
-    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", w->err_msg->data);
+    fprintf(stderr, "Unhandled 'error' event: Error: %s\n", scr_str_flat_view(w->err_msg)->data);
     _Exit(1);
   }
   size_t n = w->n_write_err;
@@ -5019,8 +5019,8 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
     posix_spawn_file_actions_adddup2(&fa, err_pipe[1], 2);
   }
 #if defined(__APPLE__) || defined(__GLIBC__) || defined(SCR_MUSL)
-  if (cwd != NULL && cwd->len > 0) {
-    posix_spawn_file_actions_addchdir_np(&fa, cwd->data);
+  if (cwd != NULL && scr_str_flat_view(cwd)->len > 0) {
+    posix_spawn_file_actions_addchdir_np(&fa, scr_str_flat_view(cwd)->data);
   }
 #endif
   posix_spawnattr_t at;
@@ -5030,11 +5030,11 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
 #else
   (void)detached; /* hosts without the flag: the child stays attached */
 #endif
-  char *shell_argv[] = {(char *)"/bin/sh", (char *)"-c", cmd->data, NULL};
+  char *shell_argv[] = {(char *)"/bin/sh", (char *)"-c", scr_str_flat_view(cmd)->data, NULL};
   char **argv = shell ? shell_argv : scr_child_argv(cmd, args);
   char **envp = has_env && env_pairs != NULL ? scr_exec_envp(env_pairs) : NULL;
   pid_t pid = -1;
-  const char *file = shell ? "/bin/sh" : cmd->data;
+  const char *file = shell ? "/bin/sh" : scr_str_flat_view(cmd)->data;
   int spawn_err = posix_spawnp(&pid, file, &fa, &at, argv,
                                envp != NULL ? envp : environ);
   posix_spawnattr_destroy(&at);
@@ -5054,10 +5054,10 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
   if (spawn_err != 0) {
     /* Node: `Error: spawn <cmd> <ERRNAME>` on the "error" event. */
     const char *name = scr_errname(spawn_err);
-    size_t len = 6 + cmd->len + 1 + strlen(name);
+    size_t len = 6 + scr_str_flat_view(cmd)->len + 1 + strlen(name);
     char *msg = malloc(len + 1);
     if (!msg) scr_child_oom();
-    snprintf(msg, len + 1, "spawn %s %s", cmd->data, name);
+    snprintf(msg, len + 1, "spawn %s %s", scr_str_flat_view(cmd)->data, name);
     c->state = SCR_CHILD_SPAWN_FAILED;
     c->spawn_errno = spawn_err;
     c->err_msg = scr_str_new(msg, len);
@@ -5140,7 +5140,7 @@ static void scr_exec_file_error_props(ScrChild *c, ScrError *error) {
   } else {
     scr_child_error_exit_fields(error, c->has_code, c->code, c->exit_signal, c->killed);
   }
-  scr_child_error_cmd(error, c->exec_display->data);
+  scr_child_error_cmd(error, scr_str_flat_view(c->exec_display)->data);
 }
 
 static ScrError *scr_exec_file_error(ScrChild *c, ScrStr *stderr_value) {
@@ -5151,13 +5151,13 @@ static ScrError *scr_exec_file_error(ScrChild *c, ScrStr *stderr_value) {
     return error;
   }
   if (c->has_code && c->code == 0) return NULL;
-  size_t cap = 16 + c->exec_display->len + 1 + stderr_value->len + 1;
+  size_t cap = 16 + scr_str_flat_view(c->exec_display)->len + 1 + scr_str_flat_view(stderr_value)->len + 1;
   char *msg = malloc(cap);
   if (!msg) scr_child_oom();
-  size_t at = (size_t)snprintf(msg, cap, "Command failed: %s", c->exec_display->data);
+  size_t at = (size_t)snprintf(msg, cap, "Command failed: %s", scr_str_flat_view(c->exec_display)->data);
   msg[at++] = '\n';
-  memcpy(msg + at, stderr_value->data, stderr_value->len);
-  at += stderr_value->len;
+  memcpy(msg + at, scr_str_flat_view(stderr_value)->data, scr_str_flat_view(stderr_value)->len);
+  at += scr_str_flat_view(stderr_value)->len;
   ScrStr *message = scr_str_new(msg, at);
   free(msg);
   ScrError *error = scr_error_new(0, message);
@@ -5234,10 +5234,10 @@ static bool scr_child_kill_signo(ScrChild *c, int signo) {
 bool scr_child_kill(ScrChild *c, const ScrStr *signal) {
   int signo = scr_signal_from_name(signal);
   if (signo < 0) {
-    size_t cap = 16 + signal->len + 1;
+    size_t cap = 16 + scr_str_flat_view(signal)->len + 1;
     char *msg = malloc(cap);
     if (!msg) scr_child_oom();
-    int len = snprintf(msg, cap, "Unknown signal: %s", signal->data);
+    int len = snprintf(msg, cap, "Unknown signal: %s", scr_str_flat_view(signal)->data);
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)len);
     free(msg);
     return false;
@@ -5422,7 +5422,7 @@ static const char *scr_err_msg_code(const ScrStr *msg) {
   static SCR_TL char buf[32];
   const char *known = scr_error_message_code(msg);
   if (known != NULL) return known;
-  const char *sp = strchr((const char *)msg->data, ' ');
+  const char *sp = strchr((const char *)scr_str_flat_view(msg)->data, ' ');
   if (sp == NULL || sp[1] != 'E') return NULL;
   const char *tok = sp + 1;
   size_t n = 1;
@@ -5561,7 +5561,7 @@ static void scr_child_settle(ScrChild *c) {
        * the loop dies mid-turn with frames and registries still live,
        * exactly like process.exit(). */
       fflush(stdout);
-      fprintf(stderr, "Unhandled 'error' event: Error: %s\n", c->err_msg->data);
+      fprintf(stderr, "Unhandled 'error' event: Error: %s\n", scr_str_flat_view(c->err_msg)->data);
       _Exit(1);
     }
     /* Node's spawn-failure error is an errnoException: `code` carries the
@@ -5726,7 +5726,7 @@ static void scr_spawn_refuse(const char *feature) {
   scr_jb_puts(&message, feature);
   scr_jb_puts(&message, " has no native lowering");
   ScrStr *text = scr_jb_finish(&message);
-  scr_throw_error_msg_code(SCR_ERR_ERROR, text->data, text->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_ERROR, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "SC2020");
   scr_str_release(text);
 }
 
@@ -5738,9 +5738,9 @@ static bool scr_spawn_stdio_mode(const ScrDyn *value, int slot,
   }
   if (value->kind == SCR_DYN_STR) {
     const ScrStr *s = value->v.str;
-    if (s->len == 4 && !memcmp(s->data, "pipe", 4)) { *mode = 3; return true; }
-    if (s->len == 6 && !memcmp(s->data, "ignore", 6)) { *mode = 0; return true; }
-    if (s->len == 7 && !memcmp(s->data, "inherit", 7)) { *mode = 1; return true; }
+    if (scr_str_flat_view(s)->len == 4 && !memcmp(scr_str_flat_view(s)->data, "pipe", 4)) { *mode = 3; return true; }
+    if (scr_str_flat_view(s)->len == 6 && !memcmp(scr_str_flat_view(s)->data, "ignore", 6)) { *mode = 0; return true; }
+    if (scr_str_flat_view(s)->len == 7 && !memcmp(scr_str_flat_view(s)->data, "inherit", 7)) { *mode = 1; return true; }
   }
   if (slot > 0 && value->kind == SCR_DYN_NUM && isfinite(value->v.num) &&
       value->v.num >= 0 && value->v.num <= 2147483647 && floor(value->v.num) == value->v.num) {
@@ -5858,7 +5858,7 @@ ScrChild *scr_spawn_dynamic(ScrStr *cmd, ScrArr *args, const ScrDyn *options) {
     if (!keys || scr_exc_pending()) goto done;
     for (size_t i = 0; i < keys->v.arr.len; i++) {
       ScrStr *key = keys->v.arr.items[i]->v.str;
-      value = scr_spawn_option(env, key->data);
+      value = scr_spawn_option(env, scr_str_flat_view(key)->data);
       if (!value || scr_exc_pending()) goto done;
       if (value->kind != SCR_DYN_UNDEF) {
         ScrStr *text = scr_dyn_string_coerce_js(value);
@@ -6134,11 +6134,11 @@ static bool scr_ipc_send(ScrIpc *ipc, ScrStr *json, ScrClosure *cb,
     }
     return false;
   }
-  char *framed = malloc(json->len + 1);
+  char *framed = malloc(scr_str_flat_view(json)->len + 1);
   if (!framed) scr_trap("out of memory");
-  memcpy(framed, json->data, json->len);
-  framed[json->len] = '\n';
-  ScrStr *line = scr_str_new(framed, json->len + 1);
+  memcpy(framed, scr_str_flat_view(json)->data, scr_str_flat_view(json)->len);
+  framed[scr_str_flat_view(json)->len] = '\n';
+  ScrStr *line = scr_str_new(framed, scr_str_flat_view(json)->len + 1);
   free(framed);
   bool ok = scr_child_writer_write_string(ipc->writer, line);
   scr_str_release(line);
@@ -6668,10 +6668,10 @@ static ScrDyn *scr_child_dyn_invoke(
     if (scr_exc_pending()) return NULL;
     if (event->kind != SCR_DYN_STR) { scr_dyn_arg_type_fail("event", "of type string", event); return NULL; }
     const ScrStr *name = event->v.str;
-    bool spawn = name->len == 5 && !memcmp(name->data, "spawn", 5);
-    bool exit = name->len == 4 && !memcmp(name->data, "exit", 4);
-    bool close = name->len == 5 && !memcmp(name->data, "close", 5);
-    bool error = name->len == 5 && !memcmp(name->data, "error", 5);
+    bool spawn = scr_str_flat_view(name)->len == 5 && !memcmp(scr_str_flat_view(name)->data, "spawn", 5);
+    bool exit = scr_str_flat_view(name)->len == 4 && !memcmp(scr_str_flat_view(name)->data, "exit", 4);
+    bool close = scr_str_flat_view(name)->len == 5 && !memcmp(scr_str_flat_view(name)->data, "close", 5);
+    bool error = scr_str_flat_view(name)->len == 5 && !memcmp(scr_str_flat_view(name)->data, "error", 5);
     if (spawn || exit || close || error) {
       void *fire = spawn ? (void *)scr_child_dyn_spawn : error ? (void *)scr_child_dyn_error : (void *)scr_child_dyn_exit;
       if (remove) {

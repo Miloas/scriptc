@@ -44,7 +44,7 @@ export function finishRuntimeCall(
   return out;
 }
 
-/** Strings inline their bytes; Buffer views carry a separate data pointer. */
+/** Borrow canonical string bytes; Buffer views carry a separate data pointer. */
 export function rawBytes(host: LlvmEmitterContext, value: LlValue): AbiArgument[] {
   const B = host.B;
   if (host.mod.workers && value.type.kind === "bytes") {
@@ -57,12 +57,11 @@ export function rawBytes(host: LlvmEmitterContext, value: LlValue): AbiArgument[
   const lengthPtr = B.tmp(),
     length = B.tmp(),
     data = B.tmp();
-  B.line(
-    `${lengthPtr} = getelementptr inbounds i8, ptr ${value.name}, i64 ${host.abiOffset(8, 4)}`,
-  );
+  const storage = value.type.kind === "string" ? host.flatStringIn(B, value.name) : value.name;
+  B.line(`${lengthPtr} = getelementptr inbounds i8, ptr ${storage}, i64 ${host.abiOffset(8, 4)}`);
   B.line(`${length} = load ${host.sizeType}, ptr ${lengthPtr}`);
   if (value.type.kind === "string") {
-    B.line(`${data} = getelementptr inbounds i8, ptr ${value.name}, i64 ${host.abiOffset(24, 12)}`);
+    B.line(`${data} = getelementptr inbounds i8, ptr ${storage}, i64 ${host.abiOffset(24, 12)}`);
   } else if (value.type.kind === "bytes" && value.type.elem === "u8") {
     const dataPtr = B.tmp();
     B.line(

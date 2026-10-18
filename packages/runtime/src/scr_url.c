@@ -474,8 +474,8 @@ static bool parse_authority(const char *raw, size_t len, bool special, bool is_f
   *userinfo = ub_take(&ub);
   /* An empty password is omitted from the serialized credentials. When
    * both username and password are empty, the authority has no userinfo. */
-  if ((*userinfo)->len > 0 && (*userinfo)->data[(*userinfo)->len - 1] == ':') {
-    ScrStr *canonical = scr_str_new((*userinfo)->data, (*userinfo)->len - 1);
+  if (scr_str_flat_view((*userinfo))->len > 0 && scr_str_flat_view((*userinfo))->data[scr_str_flat_view((*userinfo))->len - 1] == ':') {
+    ScrStr *canonical = scr_str_new(scr_str_flat_view((*userinfo))->data, scr_str_flat_view((*userinfo))->len - 1);
     scr_str_release(*userinfo);
     *userinfo = canonical;
   }
@@ -556,8 +556,8 @@ ScrUrl *scr_url_new(ScrStr *input) {
   }
   /* WHATWG pre-processing: trim leading/trailing C0-or-space, strip every
    * TAB/LF/CR. */
-  size_t raw_len = input->len;
-  const char *raw = input->data;
+  size_t raw_len = scr_str_flat_view(input)->len;
+  const char *raw = scr_str_flat_view(input)->data;
   size_t b = 0, e = raw_len;
   while (b < e && (unsigned char)raw[b] <= 0x20) b++;
   while (e > b && (unsigned char)raw[e - 1] <= 0x20) e--;
@@ -648,7 +648,7 @@ ScrUrl *scr_url_new(ScrStr *input) {
       }
       has_authority = true;
       path = parse_rooted_path_mode(body + path_start, body_len - path_start, special, is_file);
-      if (path->len == 0) {
+      if (scr_str_flat_view(path)->len == 0) {
         scr_str_release(path);
         path = scr_str_new("/", 1); /* special URLs never have empty paths */
       }
@@ -671,10 +671,10 @@ ScrUrl *scr_url_new(ScrStr *input) {
         ub_push(&rb, '/');
         ub_append(&rb, p, plen);
         ScrStr *tmp = ub_take(&rb);
-        path = parse_rooted_path_mode(tmp->data, tmp->len, special, true);
+        path = parse_rooted_path_mode(scr_str_flat_view(tmp)->data, scr_str_flat_view(tmp)->len, special, true);
         scr_str_release(tmp);
       }
-      if (path->len == 0) {
+      if (scr_str_flat_view(path)->len == 0) {
         scr_str_release(path);
         path = scr_str_new("/", 1);
       }
@@ -768,13 +768,13 @@ ScrUrl *scr_url_new_base(ScrStr *input, ScrStr *base_input) {
   }
   ScrUrl *base = scr_url_new(base_input);
   if (!base) return NULL;
-  size_t begin = 0, end = input->len;
-  while (begin < end && (unsigned char)input->data[begin] <= 0x20) begin++;
-  while (end > begin && (unsigned char)input->data[end - 1] <= 0x20) end--;
+  size_t begin = 0, end = scr_str_flat_view(input)->len;
+  while (begin < end && (unsigned char)scr_str_flat_view(input)->data[begin] <= 0x20) begin++;
+  while (end > begin && (unsigned char)scr_str_flat_view(input)->data[end - 1] <= 0x20) end--;
   UrlBuf cleaned;
   ub_init(&cleaned);
   for (size_t i = begin; i < end; i++) {
-    char c = input->data[i];
+    char c = scr_str_flat_view(input)->data[i];
     if (c != '\t' && c != '\n' && c != '\r') ub_push(&cleaned, c);
   }
   const char *raw = cleaned.data;
@@ -787,13 +787,13 @@ ScrUrl *scr_url_new_base(ScrStr *input, ScrStr *base_input) {
            raw[i] == '+' || raw[i] == '-' || raw[i] == '.')) i++;
     if (i < len && raw[i] == ':') scheme_len = i;
   }
-  bool special = is_special_scheme(base->scheme->data, base->scheme->len);
-  bool file = base->scheme->len == 4 && memcmp(base->scheme->data, "file", 4) == 0;
-  bool same_scheme = scheme_len == base->scheme->len;
+  bool special = is_special_scheme(scr_str_flat_view(base->scheme)->data, scr_str_flat_view(base->scheme)->len);
+  bool file = scr_str_flat_view(base->scheme)->len == 4 && memcmp(scr_str_flat_view(base->scheme)->data, "file", 4) == 0;
+  bool same_scheme = scheme_len == scr_str_flat_view(base->scheme)->len;
   for (size_t i = 0; same_scheme && i < scheme_len; i++) {
     char c = raw[i];
     if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-    if (c != base->scheme->data[i]) same_scheme = false;
+    if (c != scr_str_flat_view(base->scheme)->data[i]) same_scheme = false;
   }
   ScrUrl *result = NULL;
   if (scheme_len && (!same_scheme || !special)) {
@@ -806,14 +806,14 @@ ScrUrl *scr_url_new_base(ScrStr *input, ScrStr *base_input) {
   }
   bool slash = len && (raw[0] == '/' || (special && raw[0] == '\\'));
   bool authority = slash && len > 1 && (raw[1] == '/' || (special && raw[1] == '\\'));
-  bool opaque = !base->has_authority && (!base->path->len || base->path->data[0] != '/');
+  bool opaque = !base->has_authority && (!scr_str_flat_view(base->path)->len || scr_str_flat_view(base->path)->data[0] != '/');
   if (opaque && (!len || raw[0] != '#')) {
     scr_url_throw_invalid();
     goto done;
   }
   UrlBuf absolute;
   ub_init(&absolute);
-  ub_append(&absolute, base->scheme->data, base->scheme->len);
+  ub_append(&absolute, scr_str_flat_view(base->scheme)->data, scr_str_flat_view(base->scheme)->len);
   ub_push(&absolute, ':');
   if (authority) {
     ub_append(&absolute, raw, len);
@@ -825,20 +825,20 @@ ScrUrl *scr_url_new_base(ScrStr *input, ScrStr *base_input) {
     if (base->has_authority) {
       ub_append(&absolute, "//", 2);
       if (!drive) {
-        if (base->userinfo->len) {
-          ub_append(&absolute, base->userinfo->data, base->userinfo->len);
+        if (scr_str_flat_view(base->userinfo)->len) {
+          ub_append(&absolute, scr_str_flat_view(base->userinfo)->data, scr_str_flat_view(base->userinfo)->len);
           ub_push(&absolute, '@');
         }
-        ub_append(&absolute, base->host->data, base->host->len);
-        if (base->port->len) {
+        ub_append(&absolute, scr_str_flat_view(base->host)->data, scr_str_flat_view(base->host)->len);
+        if (scr_str_flat_view(base->port)->len) {
           ub_push(&absolute, ':');
-          ub_append(&absolute, base->port->data, base->port->len);
+          ub_append(&absolute, scr_str_flat_view(base->port)->data, scr_str_flat_view(base->port)->len);
         }
       }
     }
     if (!path_len) {
-      ub_append(&absolute, base->path->data, base->path->len);
-      if (!len || raw[0] == '#') ub_append(&absolute, base->query->data, base->query->len);
+      ub_append(&absolute, scr_str_flat_view(base->path)->data, scr_str_flat_view(base->path)->len);
+      if (!len || raw[0] == '#') ub_append(&absolute, scr_str_flat_view(base->query)->data, scr_str_flat_view(base->query)->len);
     } else if (drive) {
       ub_push(&absolute, '/');
     } else if (slash) {
@@ -846,14 +846,14 @@ ScrUrl *scr_url_new_base(ScrStr *input, ScrStr *base_input) {
       // a replacement drive. Dot segments must never pop that drive root.
       bool replacement_drive = path_len >= 3 && url_drive_letter(raw + 1, 2) &&
                                (path_len == 3 || raw[3] == '/' || raw[3] == '\\');
-      if (file && !replacement_drive && base->path->len >= 3 &&
-          url_drive_letter(base->path->data + 1, 2)) {
-        ub_append(&absolute, base->path->data, 3);
+      if (file && !replacement_drive && scr_str_flat_view(base->path)->len >= 3 &&
+          url_drive_letter(scr_str_flat_view(base->path)->data + 1, 2)) {
+        ub_append(&absolute, scr_str_flat_view(base->path)->data, 3);
       }
     } else {
-      size_t directory = base->path->len;
-      while (directory && base->path->data[directory - 1] != '/') directory--;
-      if (directory) ub_append(&absolute, base->path->data, directory);
+      size_t directory = scr_str_flat_view(base->path)->len;
+      while (directory && scr_str_flat_view(base->path)->data[directory - 1] != '/') directory--;
+      if (directory) ub_append(&absolute, scr_str_flat_view(base->path)->data, directory);
       else ub_push(&absolute, '/');
     }
     ub_append(&absolute, raw, len);
@@ -870,7 +870,7 @@ done:
 ScrStr *scr_url_protocol(ScrUrl *u) {
   UrlBuf b;
   ub_init(&b);
-  ub_append(&b, u->scheme->data, u->scheme->len);
+  ub_append(&b, scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
   ub_push(&b, ':');
   return ub_take(&b);
 }
@@ -909,13 +909,13 @@ ScrStr *scr_url_pathname(ScrUrl *u) { return scr_str_retain(u->path); }
  * normalized form findRoute-style authority compares want (lowercased
  * host, no default :443/:80). */
 ScrStr *scr_url_host(ScrUrl *u) {
-  if (u->port->len == 0) return scr_str_retain(u->host);
+  if (scr_str_flat_view(u->port)->len == 0) return scr_str_retain(u->host);
   UrlBuf b;
   ub_init(&b);
-  ub_append(&b, u->host->data, u->host->len);
-  if (u->port->len) {
+  ub_append(&b, scr_str_flat_view(u->host)->data, scr_str_flat_view(u->host)->len);
+  if (scr_str_flat_view(u->port)->len) {
     ub_push(&b, ':');
-    ub_append(&b, u->port->data, u->port->len);
+    ub_append(&b, scr_str_flat_view(u->port)->data, scr_str_flat_view(u->port)->len);
   }
   return ub_take(&b);
 }
@@ -929,16 +929,16 @@ ScrStr *scr_url_port(ScrUrl *u) { return scr_str_retain(u->port); }
 /* WHATWG origin is opaque for file and non-special schemes. A blob URL
  * inherits the origin of an embedded http(s) URL when its path parses. */
 ScrStr *scr_url_origin(ScrUrl *u) {
-  const char *scheme = u->scheme->data;
-  size_t len = u->scheme->len;
+  const char *scheme = scr_str_flat_view(u->scheme)->data;
+  size_t len = scr_str_flat_view(u->scheme)->len;
   if (len == 4 && memcmp(scheme, "blob", 4) == 0) {
     ScrUrl *inner = scr_url_new(u->path);
     if (!inner) {
       scr_exc_clear();
       return scr_str_new("null", 4);
     }
-    bool http = (inner->scheme->len == 4 && memcmp(inner->scheme->data, "http", 4) == 0) ||
-                (inner->scheme->len == 5 && memcmp(inner->scheme->data, "https", 5) == 0);
+    bool http = (scr_str_flat_view(inner->scheme)->len == 4 && memcmp(scr_str_flat_view(inner->scheme)->data, "http", 4) == 0) ||
+                (scr_str_flat_view(inner->scheme)->len == 5 && memcmp(scr_str_flat_view(inner->scheme)->data, "https", 5) == 0);
     ScrStr *result = http ? scr_url_origin(inner) : scr_str_new("null", 4);
     scr_url_release(inner);
     return result;
@@ -954,63 +954,63 @@ ScrStr *scr_url_origin(ScrUrl *u) {
   ub_init(&b);
   ub_append(&b, scheme, len);
   ub_append(&b, "://", 3);
-  ub_append(&b, u->host->data, u->host->len);
-  if (u->port->len > 0) {
+  ub_append(&b, scr_str_flat_view(u->host)->data, scr_str_flat_view(u->host)->len);
+  if (scr_str_flat_view(u->port)->len > 0) {
     ub_push(&b, ':');
-    ub_append(&b, u->port->data, u->port->len);
+    ub_append(&b, scr_str_flat_view(u->port)->data, scr_str_flat_view(u->port)->len);
   }
   return ub_take(&b);
 }
 
 ScrStr *scr_url_username(ScrUrl *u) {
-  const char *separator = memchr(u->userinfo->data, ':', u->userinfo->len);
-  size_t len = separator ? (size_t)(separator - u->userinfo->data) : u->userinfo->len;
-  return scr_str_new(u->userinfo->data, len);
+  const char *separator = memchr(scr_str_flat_view(u->userinfo)->data, ':', scr_str_flat_view(u->userinfo)->len);
+  size_t len = separator ? (size_t)(separator - scr_str_flat_view(u->userinfo)->data) : scr_str_flat_view(u->userinfo)->len;
+  return scr_str_new(scr_str_flat_view(u->userinfo)->data, len);
 }
 
 ScrStr *scr_url_password(ScrUrl *u) {
-  const char *separator = memchr(u->userinfo->data, ':', u->userinfo->len);
+  const char *separator = memchr(scr_str_flat_view(u->userinfo)->data, ':', scr_str_flat_view(u->userinfo)->len);
   if (!separator) return scr_str_new("", 0);
   const char *start = separator + 1;
-  return scr_str_new(start, u->userinfo->len - (size_t)(start - u->userinfo->data));
+  return scr_str_new(start, scr_str_flat_view(u->userinfo)->len - (size_t)(start - scr_str_flat_view(u->userinfo)->data));
 }
 
 ScrStr *scr_url_href(ScrUrl *u) {
   UrlBuf b;
   ub_init(&b);
-  ub_append(&b, u->scheme->data, u->scheme->len);
+  ub_append(&b, scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
   ub_push(&b, ':');
   if (u->has_authority) {
     ub_append(&b, "//", 2);
-    if (u->userinfo->len > 0) {
-      ub_append(&b, u->userinfo->data, u->userinfo->len);
+    if (scr_str_flat_view(u->userinfo)->len > 0) {
+      ub_append(&b, scr_str_flat_view(u->userinfo)->data, scr_str_flat_view(u->userinfo)->len);
       ub_push(&b, '@');
     }
-    ub_append(&b, u->host->data, u->host->len);
-    if (u->port->len > 0) {
+    ub_append(&b, scr_str_flat_view(u->host)->data, scr_str_flat_view(u->host)->len);
+    if (scr_str_flat_view(u->port)->len > 0) {
       ub_push(&b, ':');
-      ub_append(&b, u->port->data, u->port->len);
+      ub_append(&b, scr_str_flat_view(u->port)->data, scr_str_flat_view(u->port)->len);
     }
   }
   /* A host-less hierarchical path starting with // must not serialize
    * as an authority (the URL Standard's /. escape). */
-  if (!u->has_authority && u->path->len >= 2 && !memcmp(u->path->data, "//", 2)) ub_append(&b, "/.", 2);
-  ub_append(&b, u->path->data, u->path->len);
-  ub_append(&b, u->query->data, u->query->len);
-  ub_append(&b, u->fragment->data, u->fragment->len);
+  if (!u->has_authority && scr_str_flat_view(u->path)->len >= 2 && !memcmp(scr_str_flat_view(u->path)->data, "//", 2)) ub_append(&b, "/.", 2);
+  ub_append(&b, scr_str_flat_view(u->path)->data, scr_str_flat_view(u->path)->len);
+  ub_append(&b, scr_str_flat_view(u->query)->data, scr_str_flat_view(u->query)->len);
+  ub_append(&b, scr_str_flat_view(u->fragment)->data, scr_str_flat_view(u->fragment)->len);
   return ub_take(&b);
 }
 
 static bool url_opaque(ScrUrl *u) {
-  return !u->has_authority && (u->path->len == 0 || u->path->data[0] != '/');
+  return !u->has_authority && (scr_str_flat_view(u->path)->len == 0 || scr_str_flat_view(u->path)->data[0] != '/');
 }
 
 static void url_strip_opaque_spaces(ScrUrl *u) {
-  if (!url_opaque(u) || u->query->len || u->fragment->len) return;
-  size_t end = u->path->len;
-  while (end && u->path->data[end - 1] == ' ') end--;
-  if (end != u->path->len) {
-    ScrStr *path = scr_str_new(u->path->data, end);
+  if (!url_opaque(u) || scr_str_flat_view(u->query)->len || scr_str_flat_view(u->fragment)->len) return;
+  size_t end = scr_str_flat_view(u->path)->len;
+  while (end && scr_str_flat_view(u->path)->data[end - 1] == ' ') end--;
+  if (end != scr_str_flat_view(u->path)->len) {
+    ScrStr *path = scr_str_new(scr_str_flat_view(u->path)->data, end);
     scr_str_release(u->path);
     u->path = path;
   }
@@ -1030,11 +1030,11 @@ static void url_copy_fields(ScrUrl *u, ScrUrl *next) {
 }
 
 static bool url_file(ScrUrl *u) {
-  return u->scheme->len == 4 && !memcmp(u->scheme->data, "file", 4);
+  return scr_str_flat_view(u->scheme)->len == 4 && !memcmp(scr_str_flat_view(u->scheme)->data, "file", 4);
 }
 
 static bool url_cannot_have_credentials_or_port(ScrUrl *u) {
-  return !u->host->len || url_file(u) || url_opaque(u);
+  return !scr_str_flat_view(u->host)->len || url_file(u) || url_opaque(u);
 }
 
 static bool url_set_port(ScrUrl *u, const char *raw, size_t len, bool empty_input) {
@@ -1053,7 +1053,7 @@ static bool url_set_port(ScrUrl *u, const char *raw, size_t len, bool empty_inpu
   }
   char digits[6];
   size_t size = (size_t)snprintf(digits, sizeof digits, "%u", number);
-  const char *dflt = default_port(u->scheme->data, u->scheme->len);
+  const char *dflt = default_port(scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
   scr_str_release(u->port);
   u->port = scr_str_new(digits, dflt && strlen(dflt) == size && !memcmp(dflt, digits, size) ? 0 : size);
   return true;
@@ -1074,10 +1074,10 @@ static bool url_set_protocol(ScrUrl *u, const char *raw, size_t len) {
     ub_push(&normalized, c >= 'A' && c <= 'Z' ? (char)(c + 'a' - 'A') : c);
   }
   ScrStr *scheme = ub_take(&normalized);
-  bool special = is_special_scheme(scheme->data, scheme->len);
-  bool file = scheme->len == 4 && !memcmp(scheme->data, "file", 4);
-  if (is_special_scheme(u->scheme->data, u->scheme->len) != special ||
-      (file && (u->userinfo->len || u->port->len)) || (url_file(u) && !u->host->len)) {
+  bool special = is_special_scheme(scr_str_flat_view(scheme)->data, scr_str_flat_view(scheme)->len);
+  bool file = scr_str_flat_view(scheme)->len == 4 && !memcmp(scr_str_flat_view(scheme)->data, "file", 4);
+  if (is_special_scheme(scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len) != special ||
+      (file && (scr_str_flat_view(u->userinfo)->len || scr_str_flat_view(u->port)->len)) || (url_file(u) && !scr_str_flat_view(u->host)->len)) {
     scr_str_release(scheme);
     /* Ada reports these state-override rejections as failed writes, so the
      * live URL keeps its pre-conversion snapshot in Node. */
@@ -1085,8 +1085,8 @@ static bool url_set_protocol(ScrUrl *u, const char *raw, size_t len) {
   }
   scr_str_release(u->scheme);
   u->scheme = scheme;
-  const char *dflt = default_port(scheme->data, scheme->len);
-  if (dflt && u->port->len == strlen(dflt) && !memcmp(u->port->data, dflt, u->port->len)) {
+  const char *dflt = default_port(scr_str_flat_view(scheme)->data, scr_str_flat_view(scheme)->len);
+  if (dflt && scr_str_flat_view(u->port)->len == strlen(dflt) && !memcmp(scr_str_flat_view(u->port)->data, dflt, scr_str_flat_view(u->port)->len)) {
     scr_str_release(u->port);
     u->port = scr_str_new("", 0);
   }
@@ -1098,16 +1098,16 @@ static bool url_set_credentials(ScrUrl *u, ScrStr *value, bool username) {
   ScrStr *other = username ? scr_url_password(u) : scr_url_username(u);
   UrlBuf encoded;
   ub_init(&encoded);
-  for (size_t i = 0; i < value->len; i++) ub_push_encoded(&encoded, (unsigned char)value->data[i], enc_userinfo);
+  for (size_t i = 0; i < scr_str_flat_view(value)->len; i++) ub_push_encoded(&encoded, (unsigned char)scr_str_flat_view(value)->data[i], enc_userinfo);
   ScrStr *part = ub_take(&encoded);
   ScrStr *user = username ? part : other;
   ScrStr *pass = username ? other : part;
   UrlBuf combined;
   ub_init(&combined);
-  ub_append(&combined, user->data, user->len);
-  if (pass->len) {
+  ub_append(&combined, scr_str_flat_view(user)->data, scr_str_flat_view(user)->len);
+  if (scr_str_flat_view(pass)->len) {
     ub_push(&combined, ':');
-    ub_append(&combined, pass->data, pass->len);
+    ub_append(&combined, scr_str_flat_view(pass)->data, scr_str_flat_view(pass)->len);
   }
   scr_str_release(u->userinfo);
   u->userinfo = ub_take(&combined);
@@ -1119,7 +1119,7 @@ static bool url_set_credentials(ScrUrl *u, ScrStr *value, bool username) {
 static bool url_set_host(ScrUrl *u, const char *raw, size_t len, bool hostname) {
   if (url_opaque(u)) return false;
   bool file = url_file(u);
-  bool special = is_special_scheme(u->scheme->data, u->scheme->len);
+  bool special = is_special_scheme(scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
   size_t end = 0;
   bool bracket = false, colon = false;
   for (; end < len; end++) {
@@ -1130,13 +1130,13 @@ static bool url_set_host(ScrUrl *u, const char *raw, size_t len, bool hostname) 
     if (c == ']') bracket = false;
   }
   if (colon && (hostname || !end)) return false;
-  if (!end && !file && (special || u->userinfo->len || u->port->len)) return false;
+  if (!end && !file && (special || scr_str_flat_view(u->userinfo)->len || scr_str_flat_view(u->port)->len)) return false;
   ScrStr *host = NULL;
   if (!parse_host(raw, end, special, file, &host)) return false;
-  bool escaped_path = !u->has_authority && u->path->len >= 2 && !memcmp(u->path->data, "//", 2);
+  bool escaped_path = !u->has_authority && scr_str_flat_view(u->path)->len >= 2 && !memcmp(scr_str_flat_view(u->path)->data, "//", 2);
   scr_str_release(u->host);
   u->host = host;
-  if (host->len || escaped_path) u->has_authority = true;
+  if (scr_str_flat_view(host)->len || escaped_path) u->has_authority = true;
   if (colon && end + 1 < len) url_set_port(u, raw + end + 1, len - end - 1, false);
   return true;
 }
@@ -1144,7 +1144,7 @@ static bool url_set_host(ScrUrl *u, const char *raw, size_t len, bool hostname) 
 /* The result distinguishes successful state overrides from ignored writes:
  * only successful writes replace Node's pre-conversion URL snapshot. */
 static bool url_apply_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
-  if (field->len == 4 && !memcmp(field->data, "href", 4)) {
+  if (scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "href", 4)) {
     ScrUrl *next = scr_url_new(value);
     if (!next) return false;
     url_copy_fields(u, next);
@@ -1152,15 +1152,15 @@ static bool url_apply_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
     if (u->sp_cache) u->sp_reload(u->sp_cache, u->query);
     return true;
   }
-  bool pathname = field->len == 8 && !memcmp(field->data, "pathname", 8);
-  bool search = field->len == 6 && !memcmp(field->data, "search", 6);
-  bool hash = field->len == 4 && !memcmp(field->data, "hash", 4);
-  bool protocol = field->len == 8 && !memcmp(field->data, "protocol", 8);
-  bool username = field->len == 8 && !memcmp(field->data, "username", 8);
-  bool password = field->len == 8 && !memcmp(field->data, "password", 8);
-  bool host = field->len == 4 && !memcmp(field->data, "host", 4);
-  bool hostname = field->len == 8 && !memcmp(field->data, "hostname", 8);
-  bool port = field->len == 4 && !memcmp(field->data, "port", 4);
+  bool pathname = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "pathname", 8);
+  bool search = scr_str_flat_view(field)->len == 6 && !memcmp(scr_str_flat_view(field)->data, "search", 6);
+  bool hash = scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "hash", 4);
+  bool protocol = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "protocol", 8);
+  bool username = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "username", 8);
+  bool password = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "password", 8);
+  bool host = scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "host", 4);
+  bool hostname = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "hostname", 8);
+  bool port = scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "port", 4);
   if (!pathname && !search && !hash && !protocol && !username && !password && !host && !hostname && !port) {
     static const char message[] = "Native URL setter has no lowering";
     scr_throw_error_msg_code(SCR_ERR_ERROR, message, sizeof message - 1, "SC2020");
@@ -1170,21 +1170,21 @@ static bool url_apply_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
   if (pathname && url_opaque(u)) return false;
   UrlBuf raw;
   ub_init(&raw);
-  size_t start = (search || hash) && value->len && value->data[0] == (search ? '?' : '#') ? 1 : 0;
-  for (size_t i = start; i < value->len; i++) {
-    char c = value->data[i];
+  size_t start = (search || hash) && scr_str_flat_view(value)->len && scr_str_flat_view(value)->data[0] == (search ? '?' : '#') ? 1 : 0;
+  for (size_t i = start; i < scr_str_flat_view(value)->len; i++) {
+    char c = scr_str_flat_view(value)->data[i];
     if ((host || hostname) && c == '#') break;
     if (c != '\t' && c != '\n' && c != '\r') ub_push(&raw, c);
   }
-  bool special = is_special_scheme(u->scheme->data, u->scheme->len);
+  bool special = is_special_scheme(scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
   bool applied = true;
   if (protocol) applied = url_set_protocol(u, raw.data, raw.len);
-  else if (port) applied = url_set_port(u, raw.data, raw.len, !value->len);
+  else if (port) applied = url_set_port(u, raw.data, raw.len, !scr_str_flat_view(value)->len);
   else if (host || hostname) applied = url_set_host(u, raw.data, raw.len, hostname);
   else if (pathname) {
-    bool file = u->scheme->len == 4 && !memcmp(u->scheme->data, "file", 4);
+    bool file = scr_str_flat_view(u->scheme)->len == 4 && !memcmp(scr_str_flat_view(u->scheme)->data, "file", 4);
     ScrStr *path = parse_rooted_path_mode(raw.data, raw.len, special, file);
-    if (!path->len && (special || !u->has_authority)) {
+    if (!scr_str_flat_view(path)->len && (special || !u->has_authority)) {
       scr_str_release(path);
       path = scr_str_new("/", 1);
     }
@@ -1193,7 +1193,7 @@ static bool url_apply_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
   } else {
     UrlBuf encoded;
     ub_init(&encoded);
-    if (value->len) {
+    if (scr_str_flat_view(value)->len) {
       char prefix = search ? '?' : '#';
       ub_push(&encoded, prefix);
       for (size_t i = 0; i < raw.len; i++) {
@@ -1223,7 +1223,7 @@ bool scr_url_set_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
     scr_str_release(usv);
     return applied;
   }
-  if (field->len == 4 && !memcmp(field->data, "href", 4)) return url_apply_component(u, field, value);
+  if (scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "href", 4)) return url_apply_component(u, field, value);
   /* Node's binding reparses the captured href before applying an override.
    * This matters after protocol writes to file://localhost, which the
    * reparse turns into an empty host. Ignored overrides retain the live URL. */
@@ -1234,7 +1234,7 @@ bool scr_url_set_component(ScrUrl *u, ScrStr *field, ScrStr *value) {
   bool applied = url_apply_component(next, field, value);
   if (applied) {
     url_copy_fields(u, next);
-    if (field->len == 6 && !memcmp(field->data, "search", 6) && u->sp_cache) u->sp_reload(u->sp_cache, u->query);
+    if (scr_str_flat_view(field)->len == 6 && !memcmp(scr_str_flat_view(field)->data, "search", 6) && u->sp_cache) u->sp_reload(u->sp_cache, u->query);
   }
   scr_url_release(next);
   return applied;
@@ -1247,8 +1247,8 @@ void scr_url_set(ScrUrl *u, ScrStr *field, ScrStr *value) {
 /* Node snapshots a component setter's URL before invoking user string
  * conversion. href converts first, and opaque pathname writes are ignored. */
 void scr_url_set_checked(ScrUrl *u, ScrStr *field, const ScrDyn *value) {
-  bool href = field->len == 4 && !memcmp(field->data, "href", 4);
-  bool ignored = field->len == 8 && !memcmp(field->data, "pathname", 8) && url_opaque(u);
+  bool href = scr_str_flat_view(field)->len == 4 && !memcmp(scr_str_flat_view(field)->data, "href", 4);
+  bool ignored = scr_str_flat_view(field)->len == 8 && !memcmp(scr_str_flat_view(field)->data, "pathname", 8) && url_opaque(u);
   ScrUrl *saved = NULL;
   if (!href && !ignored) {
     saved = malloc(sizeof *saved);
@@ -1270,7 +1270,7 @@ void scr_url_set_checked(ScrUrl *u, ScrStr *field, const ScrDyn *value) {
     bool applied = scr_url_set_component(saved ? saved : u, field, text);
     if (saved && applied && !scr_exc_pending()) {
       url_copy_fields(u, saved);
-      if (field->len == 6 && !memcmp(field->data, "search", 6) && u->sp_cache) u->sp_reload(u->sp_cache, u->query);
+      if (scr_str_flat_view(field)->len == 6 && !memcmp(scr_str_flat_view(field)->data, "search", 6) && u->sp_cache) u->sp_reload(u->sp_cache, u->query);
     }
   }
   scr_str_release(text);
@@ -1287,13 +1287,13 @@ static int hex_val(char c) {
 }
 
 static bool url_file_scheme(ScrUrl *u) {
-  if (u->scheme->len == 4 && memcmp(u->scheme->data, "file", 4) == 0) return true;
+  if (scr_str_flat_view(u->scheme)->len == 4 && memcmp(scr_str_flat_view(u->scheme)->data, "file", 4) == 0) return true;
   scr_throw_error_msg_code(SCR_ERR_TYPE, "The URL must be of scheme file", 30, "ERR_INVALID_URL_SCHEME");
   return false;
 }
 
 static bool url_file_posix_host(ScrUrl *u) {
-  if (u->host->len == 0) return true;
+  if (scr_str_flat_view(u->host)->len == 0) return true;
   const char *platform =
 #if defined(__APPLE__)
       "darwin";
@@ -1316,8 +1316,8 @@ static bool url_file_posix_host(ScrUrl *u) {
  * letter otherwise. The public wrappers below select by TARGET. */
 static ScrStr *scr_url_to_path_impl(ScrUrl *u, bool win32) {
   if (!url_file_scheme(u)) return NULL;
-  const char *p = u->path->data;
-  size_t len = u->path->len;
+  const char *p = scr_str_flat_view(u->path)->data;
+  size_t len = scr_str_flat_view(u->path)->len;
   if (win32) {
     /* Node scans the ENCODED pathname for %2f/%2F (/) and %5c/%5C (\). */
     for (size_t n = 0; n + 1 < len; n++) {
@@ -1337,18 +1337,18 @@ static ScrStr *scr_url_to_path_impl(ScrUrl *u, bool win32) {
     if (!decoded) return NULL;
     UrlBuf out;
     ub_init(&out);
-    if (u->host->len > 0) {
+    if (scr_str_flat_view(u->host)->len > 0) {
       /* A UNC path: \\host + pathname. (Node passes the hostname through
        * domainToUnicode; this parser rejected non-ASCII/IDN hosts at
        * construction, so the host is already plain ASCII.) */
       ub_append(&out, "\\\\", 2);
-      ub_append(&out, u->host->data, u->host->len);
+      ub_append(&out, scr_str_flat_view(u->host)->data, scr_str_flat_view(u->host)->len);
     }
     size_t path_start = out.len;
-    for (size_t i = 0; i < decoded->len; i++)
-      ub_push(&out, decoded->data[i] == '/' ? '\\' : decoded->data[i]);
+    for (size_t i = 0; i < scr_str_flat_view(decoded)->len; i++)
+      ub_push(&out, scr_str_flat_view(decoded)->data[i] == '/' ? '\\' : scr_str_flat_view(decoded)->data[i]);
     scr_str_release(decoded);
-    if (u->host->len > 0) return ub_take(&out);
+    if (scr_str_flat_view(u->host)->len > 0) return ub_take(&out);
     /* A local path requires a drive letter: pathname[1] in [a-zA-Z] and
      * pathname[2] === ':' (both on the DECODED, backslashed pathname). */
     size_t plen = out.len - path_start;
@@ -1442,7 +1442,7 @@ static void scr_url_throw_arg_value(const char *reason, ScrStr *value) {
   ub_append(&msg, "The argument 'path' ", 20);
   ub_append(&msg, reason, strlen(reason));
   ub_append(&msg, ". Received ", 11);
-  ub_push_inspected(&msg, value->data, value->len);
+  ub_push_inspected(&msg, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg.data, msg.len, "ERR_INVALID_ARG_VALUE");
   free(msg.data);
 }
@@ -1490,7 +1490,7 @@ static ScrUrl *scr_url_from_path_impl(ScrStr *path, bool win32) {
   }
   ScrStr *resolved;
   if (win32) {
-    bool is_unc = path->len >= 2 && path->data[0] == '\\' && path->data[1] == '\\';
+    bool is_unc = scr_str_flat_view(path)->len >= 2 && scr_str_flat_view(path)->data[0] == '\\' && scr_str_flat_view(path)->data[1] == '\\';
     if (is_unc) {
       resolved = scr_str_retain(path);
     } else {
@@ -1499,14 +1499,14 @@ static ScrUrl *scr_url_from_path_impl(ScrStr *path, bool win32) {
       resolved = scr_path_win32_resolve(pack);
       scr_arr_release(pack);
     }
-    if (is_unc || (resolved->len >= 2 && resolved->data[0] == '\\' && resolved->data[1] == '\\')) {
+    if (is_unc || (scr_str_flat_view(resolved)->len >= 2 && scr_str_flat_view(resolved)->data[0] == '\\' && scr_str_flat_view(resolved)->data[1] == '\\')) {
       /* UNC path format: \\server\share\resource; an extended
        * \\?\UNC\ prefix is ignored. */
-      bool extended = resolved->len >= 8 && memcmp(resolved->data, "\\\\?\\UNC\\", 8) == 0;
+      bool extended = scr_str_flat_view(resolved)->len >= 8 && memcmp(scr_str_flat_view(resolved)->data, "\\\\?\\UNC\\", 8) == 0;
       size_t prefix = extended ? 8 : 2;
       long host_end = -1;
-      for (size_t i = prefix; i < resolved->len; i++) {
-        if (resolved->data[i] == '\\') {
+      for (size_t i = prefix; i < scr_str_flat_view(resolved)->len; i++) {
+        if (scr_str_flat_view(resolved)->data[i] == '\\') {
           host_end = (long)i;
           break;
         }
@@ -1530,13 +1530,13 @@ static ScrUrl *scr_url_from_path_impl(ScrStr *path, bool win32) {
       UrlBuf host;
       ub_init(&host);
       for (size_t i = prefix; i < (size_t)host_end; i++) {
-        char c = resolved->data[i];
+        char c = scr_str_flat_view(resolved)->data[i];
         if (c == '/' || c == '?' || c == '#') break;
         if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
         ub_push(&host, c);
       }
-      ScrStr *encoded = scr_url_encode_file_path(resolved->data + host_end,
-                                                 resolved->len - (size_t)host_end, true);
+      ScrStr *encoded = scr_url_encode_file_path(scr_str_flat_view(resolved)->data + host_end,
+                                                 scr_str_flat_view(resolved)->len - (size_t)host_end, true);
       scr_str_release(resolved);
       return scr_url_new_file(ub_take(&host), encoded);
     }
@@ -1550,13 +1550,13 @@ static ScrUrl *scr_url_from_path_impl(ScrStr *path, bool win32) {
    * back (the input ends with a separator the resolved path lost). On
    * win32 the input separator set is both slashes and the resolved path
    * keeps '\\' only at a root; posix knows '/' alone. */
-  char last = path->len > 0 ? path->data[path->len - 1] : 0;
+  char last = scr_str_flat_view(path)->len > 0 ? scr_str_flat_view(path)->data[scr_str_flat_view(path)->len - 1] : 0;
   bool wants_trailing = win32 ? (last == '/' || last == '\\') : last == '/';
-  char resolved_last = resolved->len > 0 ? resolved->data[resolved->len - 1] : 0;
+  char resolved_last = scr_str_flat_view(resolved)->len > 0 ? scr_str_flat_view(resolved)->data[scr_str_flat_view(resolved)->len - 1] : 0;
   bool has_trailing = win32 ? resolved_last == '\\' : resolved_last == '/';
   UrlBuf raw;
   ub_init(&raw);
-  ub_append(&raw, resolved->data, resolved->len);
+  ub_append(&raw, scr_str_flat_view(resolved)->data, scr_str_flat_view(resolved)->len);
   if (wants_trailing && !has_trailing) ub_push(&raw, '/');
   ScrStr *encoded = scr_url_encode_file_path(raw.data, raw.len, win32);
   free(raw.data);
@@ -1586,13 +1586,13 @@ ScrUrl *scr_url_from_path_w32(ScrStr *path) { return scr_url_from_path_impl(path
 /* WHATWG search getter: "" for no query AND for the bare-'?' query;
  * "?..." verbatim otherwise. */
 ScrStr *scr_url_search(ScrUrl *u) {
-  if (u->query->len <= 1) return scr_str_new("", 0);
+  if (scr_str_flat_view(u->query)->len <= 1) return scr_str_new("", 0);
   return scr_str_retain(u->query);
 }
 
 /* A bare '#' remains in href but its hash getter is empty, like Node. */
 ScrStr *scr_url_hash(ScrUrl *u) {
-  if (u->fragment->len <= 1) return scr_str_new("", 0);
+  if (scr_str_flat_view(u->fragment)->len <= 1) return scr_str_new("", 0);
   return scr_str_retain(u->fragment);
 }
 
@@ -1822,7 +1822,7 @@ ScrSearchParams *scr_sp_new_checked(const ScrDyn *value) {
     if (scr_exc_pending()) { scr_sp_release(result); return NULL; }
     for (size_t i = 0; i < keys->v.arr.len; i++) {
       ScrStr *key = keys->v.arr.items[i]->v.str;
-      ScrDyn *entry = scr_dyn_obj_read(value, key->data, key->len);
+      ScrDyn *entry = scr_dyn_obj_read(value, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
       ScrStr *text = scr_exc_pending() ? NULL : scr_dyn_string_coerce_js(entry);
       scr_dyn_release(entry);
       if (!scr_exc_pending()) scr_sp_append(result, key, text);
@@ -1901,7 +1901,7 @@ static ScrUrl *url_checked_file_input(const ScrDyn *value) {
   }
   ScrDyn *protocol = url_property_read(value, "protocol");
   if (!protocol || scr_exc_pending()) { scr_dyn_release(protocol); return NULL; }
-  bool file = protocol->kind == SCR_DYN_STR && protocol->v.str->len == 5 && memcmp(protocol->v.str->data, "file:", 5) == 0;
+  bool file = protocol->kind == SCR_DYN_STR && scr_str_flat_view(protocol->v.str)->len == 5 && memcmp(scr_str_flat_view(protocol->v.str)->data, "file:", 5) == 0;
   scr_dyn_release(protocol);
   if (!file) {
     scr_throw_error_msg_code(SCR_ERR_TYPE, "The URL must be of scheme file", 30, "ERR_INVALID_URL_SCHEME");
@@ -1953,13 +1953,13 @@ ScrBytes *scr_url_checked_to_path_buffer(const ScrDyn *value, const ScrDyn *opti
   }
   UrlBuf decoded;
   ub_init(&decoded);
-  if (windows && url->host->len) {
+  if (windows && scr_str_flat_view(url->host)->len) {
     ub_append(&decoded, "\\\\", 2);
-    ub_append(&decoded, url->host->data, url->host->len);
+    ub_append(&decoded, scr_str_flat_view(url->host)->data, scr_str_flat_view(url->host)->len);
   }
-  const char *path = url->path->data;
-  for (size_t i = 0; i < url->path->len; i++) {
-    if (path[i] == '%' && i + 2 < url->path->len) {
+  const char *path = scr_str_flat_view(url->path)->data;
+  for (size_t i = 0; i < scr_str_flat_view(url->path)->len; i++) {
+    if (path[i] == '%' && i + 2 < scr_str_flat_view(url->path)->len) {
       int high = hex_val(path[i + 1]), low = hex_val(path[i + 2]);
       if (high >= 0 && low >= 0) {
         ub_push(&decoded, (char)((high << 4) | low));
@@ -1972,7 +1972,7 @@ ScrBytes *scr_url_checked_to_path_buffer(const ScrDyn *value, const ScrDyn *opti
     ub_push(&decoded, windows && path[i] == '/' ? '\\' : path[i]);
   }
   size_t start = 0;
-  if (windows && url->host->len == 0) {
+  if (windows && scr_str_flat_view(url->host)->len == 0) {
     int letter = (decoded.len > 1 ? (unsigned char)decoded.data[1] : 0) | 0x20;
     if (letter < 'a' || letter > 'z' || decoded.len < 3 || decoded.data[2] != ':') {
       free(decoded.data);
@@ -2219,11 +2219,11 @@ static bool pc_encode(const PcPoints *input, ScrJsonBuf *buf) {
   return true;
 }
 
-ScrStr *scr_punycode_decode(const ScrStr *input) { return pc_decode(input->data, input->len); }
+ScrStr *scr_punycode_decode(const ScrStr *input) { return pc_decode(scr_str_flat_view(input)->data, scr_str_flat_view(input)->len); }
 
 ScrStr *scr_punycode_encode(const ScrStr *input) {
   PcPoints points = {0};
-  pc_code_points(input->data, input->len, &points);
+  pc_code_points(scr_str_flat_view(input)->data, scr_str_flat_view(input)->len, &points);
   ScrJsonBuf buf;
   scr_jb_init(&buf);
   bool ok = pc_encode(&points, &buf);
@@ -2236,7 +2236,7 @@ ScrStr *scr_punycode_encode(const ScrStr *input) {
 
 ScrArr *scr_punycode_ucs2_decode(const ScrStr *input) {
   PcPoints points = {0};
-  pc_code_points(input->data, input->len, &points);
+  pc_code_points(scr_str_flat_view(input)->data, scr_str_flat_view(input)->len, &points);
   ScrArr *out = scr_arr_new(SCR_ELEM_F64, points.len);
   for (size_t i = 0; i < points.len; i++) scr_arr_push_f64(out, (double)points.data[i]);
   free(points.data);
@@ -2248,8 +2248,8 @@ ScrArr *scr_punycode_ucs2_decode(const ScrStr *input) {
  * separators U+002E, U+3002, U+FF0E and U+FF61 all split labels, and the
  * labels rejoin with '.'. */
 static ScrStr *pc_map_domain(const ScrStr *input, bool to_ascii) {
-  const char *s = input->data;
-  size_t n = input->len;
+  const char *s = scr_str_flat_view(input)->data;
+  size_t n = scr_str_flat_view(input)->len;
   ScrJsonBuf buf;
   scr_jb_init(&buf);
   const char *at = memchr(s, '@', n);
@@ -2305,7 +2305,7 @@ static ScrStr *pc_map_domain(const ScrStr *input, bool to_ascii) {
         }
       }
       ScrStr *folded = scr_jb_finish(&lower);
-      ScrStr *decoded = pc_decode(folded->data, folded->len);
+      ScrStr *decoded = pc_decode(scr_str_flat_view(folded)->data, scr_str_flat_view(folded)->len);
       scr_str_release(folded);
       if (decoded) {
         scr_jb_put_str(&buf, decoded);

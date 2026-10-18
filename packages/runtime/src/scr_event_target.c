@@ -90,7 +90,7 @@ static void *scr_et_calloc(size_t n) {
 }
 
 static bool scr_et_eq(const ScrStr *s, const char *want) {
-  return s->len == strlen(want) && memcmp(s->data, want, s->len) == 0;
+  return scr_str_flat_view(s)->len == strlen(want) && memcmp(scr_str_flat_view(s)->data, want, scr_str_flat_view(s)->len) == 0;
 }
 
 static void scr_et_type_error(const char *message, const char *code) {
@@ -200,7 +200,7 @@ static void scr_et_listener_remove(ScrEtListener *l) {
 
 static ScrEtRoot *scr_et_root_find(const ScrEventTargetCore *core, const ScrStr *type) {
   for (ScrEtRoot *r = core->roots; r; r = r->map_next) {
-    if (r->type->len == type->len && memcmp(r->type->data, type->data, type->len) == 0) return r;
+    if (scr_str_flat_view(r->type)->len == scr_str_flat_view(type)->len && memcmp(scr_str_flat_view(r->type)->data, scr_str_flat_view(type)->data, scr_str_flat_view(type)->len) == 0) return r;
   }
   return NULL;
 }
@@ -311,8 +311,8 @@ static void scr_et_warn_tick(ScrClosure *cb) {
     return;
   }
   fflush(stdout);
-  fprintf(stderr, "(node:%ld) %s: %.*s\n", SCR_ET_PID(), w->name, (int)w->message->len,
-          w->message->data);
+  fprintf(stderr, "(node:%ld) %s: %.*s\n", SCR_ET_PID(), w->name, (int)scr_str_flat_view(w->message)->len,
+          scr_str_flat_view(w->message)->data);
   if (!scr_warning_trace_hint_shown) {
     scr_warning_trace_hint_shown = true;
     fputs("(Use `node --trace-warnings ...` to show where the warning was created)\n", stderr);
@@ -339,7 +339,7 @@ static void scr_et_new_listener(ScrEventTargetCore *core, ScrEtRoot *root) {
   snprintf(message, sizeof message,
            "Possible EventTarget memory leak detected. %zu %.*s listeners added to %s. "
            "MaxListeners is %g. Use events.setMaxListeners() to increase limit",
-           root->size, (int)root->type->len, root->type->data, core->cls, core->max_listeners);
+           root->size, (int)scr_str_flat_view(root->type)->len, scr_str_flat_view(root->type)->data, core->cls, core->max_listeners);
   scr_et_warn("MaxListenersExceededWarning", message);
 }
 
@@ -755,7 +755,7 @@ static void scr_et_invoke(ScrEtListener *l, ScrDyn *self, ScrDyn *event) {
       char message[320];
       snprintf(message, sizeof message,
                "Function.prototype.apply was called on %.*s, which is %s and not a function",
-               text ? (int)text->len : 0, text ? text->data : "", kind);
+               text ? (int)scr_str_flat_view(text)->len : 0, text ? scr_str_flat_view(text)->data : "", kind);
       scr_str_release(text);
       scr_throw_error_msg(SCR_ERR_TYPE, message, strlen(message));
       scr_et_reject_through_catch(scr_exc_take());
@@ -853,7 +853,7 @@ ScrDyn *scr_et_dispatch_event(ScrEventTargetCore *core, ScrDyn *self, ScrDyn *co
   if (ev->dispatching) {
     char message[256];
     snprintf(message, sizeof message, "The event \"%.*s\" is already being dispatched",
-             (int)ev->type->len, ev->type->data);
+             (int)scr_str_flat_view(ev->type)->len, scr_str_flat_view(ev->type)->data);
     scr_throw_error_msg_code(SCR_ERR_ERROR, message, strlen(message), "ERR_EVENT_RECURSION");
     return NULL;
   }
@@ -1403,7 +1403,7 @@ ScrDyn *scr_event_target_obj_call(void *obj, ScrDyn *self, ScrStr *method, ScrDy
   ScrEventTargetObj *t = obj;
   scr_et_keep_self(t, self);
   ScrDyn *out = NULL;
-  scr_et_target_method(t->core, self, method->data, args->v.arr.items, args->v.arr.len, &out);
+  scr_et_target_method(t->core, self, scr_str_flat_view(method)->data, args->v.arr.items, args->v.arr.len, &out);
   return out;
 }
 
@@ -1422,46 +1422,46 @@ bool scr_event_target_obj_dispatch(void *obj, ScrDyn *self, ScrDyn *event) {
 
 ScrDyn *scr_event_obj_get(void *obj, ScrStr *key) {
   ScrEventObj *e = obj;
-  ScrDyn *value = scr_event_get(e->ev, key->data, key->len);
+  ScrDyn *value = scr_event_get(e->ev, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
   return value ? value : scr_dyn_retain(scr_dyn_undefined());
 }
 
 void scr_event_obj_set(void *obj, ScrStr *key, ScrDyn *value) {
   ScrEventObj *e = obj;
-  scr_event_set(e->ev, key->data, key->len, value);
+  scr_event_set(e->ev, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, value);
 }
 
 ScrDyn *scr_event_obj_call(void *obj, ScrStr *method, ScrDyn *args) {
   ScrEventObj *e = obj;
-  return scr_event_invoke(e->ev, NULL, method->data, args->v.arr.items, args->v.arr.len,
-                          method->data);
+  return scr_event_invoke(e->ev, NULL, scr_str_flat_view(method)->data, args->v.arr.items, args->v.arr.len,
+                          scr_str_flat_view(method)->data);
 }
 
 /* Checked-dynamic access to the inherited members (the handle ops' twins
  * over the capsule; members of the subclass itself answer through the
  * capsule's ordinary view). */
 static ScrDyn *scr_event_ref_get(const ScrDyn *d, const ScrStr *key) {
-  if (scr_event_target_obj_of(d)) return scr_et_method_value(key->data, key->len, true);
+  if (scr_event_target_obj_of(d)) return scr_et_method_value(scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, true);
   ScrEventObj *e = scr_event_obj_of(d);
-  return e && e->ev ? scr_event_get(e->ev, key->data, key->len) : NULL;
+  return e && e->ev ? scr_event_get(e->ev, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len) : NULL;
 }
 
 static bool scr_event_ref_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
   ScrEventTargetObj *t = scr_event_target_obj_of(d);
   ScrEventObj *e = scr_event_obj_of(d);
   if (!t && !(e && e->ev)) return false;
-  if (e && scr_event_set(e->ev, key->data, key->len, value)) return true;
+  if (e && scr_event_set(e->ev, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, value)) return true;
   /* The other inherited members are getters and prototype methods; a
    * write would shadow them with an own property the engine never
    * reads. */
-  ScrDyn *inherited = t ? scr_et_method_value(key->data, key->len, true)
-                        : scr_event_get(e->ev, key->data, key->len);
+  ScrDyn *inherited = t ? scr_et_method_value(scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, true)
+                        : scr_event_get(e->ev, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
   if (!inherited) return false;
   scr_dyn_release(inherited);
   char message[128];
   snprintf(message, sizeof message,
            "writing the inherited member '%.*s' through an untyped value is not supported",
-           (int)key->len, key->data);
+           (int)scr_str_flat_view(key)->len, scr_str_flat_view(key)->data);
   scr_throw_error_msg_code(SCR_ERR_ERROR, message, strlen(message), "SC2020");
   return true;
 }

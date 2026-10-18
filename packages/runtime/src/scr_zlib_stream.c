@@ -400,8 +400,8 @@ static bool scr_zs_check_unlowered(const ScrDyn *opts) {
     return scr_zs_unsupported("the stream option 'signal' is not supported yet (AbortSignal-driven destruction has no lowering)");
   v = scr_zs_opt(opts, "defaultEncoding");
   if (v != NULL && v->kind == SCR_DYN_STR &&
-      !(v->v.str->len == 4 && memcmp(v->v.str->data, "utf8", 4) == 0) &&
-      !(v->v.str->len == 5 && memcmp(v->v.str->data, "utf-8", 5) == 0))
+      !(scr_str_flat_view(v->v.str)->len == 4 && memcmp(scr_str_flat_view(v->v.str)->data, "utf8", 4) == 0) &&
+      !(scr_str_flat_view(v->v.str)->len == 5 && memcmp(scr_str_flat_view(v->v.str)->data, "utf-8", 5) == 0))
     return scr_zs_unsupported("the stream option 'defaultEncoding' is not supported yet (utf8, the default, is the write-side string encoding)");
   static const char *const fns[] = { "construct", "read", "write", "writev", "final", "destroy",
                                      "transform" };

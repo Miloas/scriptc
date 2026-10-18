@@ -47,9 +47,9 @@ static size_t scr_grapheme_next(const ScrStr *input, size_t start, size_t *units
   unsigned indic = 0, ri_parity = 0;
   size_t at = start;
   *units = 0;
-  while (at < input->len) {
+  while (at < scr_str_flat_view(input)->len) {
     size_t size;
-    uint32_t cp = scr_grapheme_decode(input->data + at, &size);
+    uint32_t cp = scr_grapheme_decode(scr_str_flat_view(input)->data + at, &size);
     unsigned property = scr_grapheme_property(cp);
     unsigned current = property & 15u, incb = (property >> 4) & 3u;
     bool pictographic = (property & 64u) != 0;
@@ -110,7 +110,7 @@ static ScrDyn *scr_graphemes_box(ScrStr *input, ScrDynHandleTag tag) {
 
 static ScrDyn *scr_grapheme_record(ScrStr *input, size_t start, size_t end, size_t index) {
   ScrDyn *record = scr_dyn_new_obj();
-  ScrStr *segment = scr_str_new(input->data + start, end - start);
+  ScrStr *segment = scr_str_new(scr_str_flat_view(input)->data + start, end - start);
   scr_dyn_obj_set(record, "segment", 7, scr_dyn_new_str(segment));
   scr_str_release(segment);
   scr_dyn_obj_set(record, "index", 5, scr_dyn_new_num((double)index));
@@ -122,7 +122,7 @@ static ScrDyn *scr_graphemes_iter(void *ptr) {
   ScrStr *input = ((ScrGraphemes *)ptr)->input;
   ScrDyn *result = scr_dyn_new_arr();
   size_t index = 0;
-  for (size_t start = 0; start < input->len;) {
+  for (size_t start = 0; start < scr_str_flat_view(input)->len;) {
     size_t units;
     size_t end = scr_grapheme_next(input, start, &units);
     scr_dyn_arr_push(result, scr_grapheme_record(input, start, end, index));
@@ -148,7 +148,7 @@ static ScrDyn *scr_graphemes_invoke(void *ptr, ScrDyn *self, const char *method,
     index = isnan(index) ? 0 : trunc(index);
     if (index >= 0 && isfinite(index)) {
       size_t offset = 0;
-      for (size_t start = 0; start < value->input->len;) {
+      for (size_t start = 0; start < scr_str_flat_view(value->input)->len;) {
         size_t units;
         size_t end = scr_grapheme_next(value->input, start, &units);
         if (index < (double)(offset + units)) return scr_grapheme_record(value->input, start, end, offset);

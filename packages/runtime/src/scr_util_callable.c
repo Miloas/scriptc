@@ -237,8 +237,8 @@ static bool uc_deprecation_warn(ScrClosure *closure) {
   ScrDyn *msg = uc_cap(closure, UC_DEP_MSG);
   ScrDyn *code = uc_cap(closure, UC_DEP_CODE);
   bool ok = true;
-  if (code->kind == SCR_DYN_STR && code->v.str->len == 19 &&
-      memcmp(code->v.str->data, "ExperimentalWarning", 19) == 0) {
+  if (code->kind == SCR_DYN_STR && scr_str_flat_view(code->v.str)->len == 19 &&
+      memcmp(scr_str_flat_view(code->v.str)->data, "ExperimentalWarning", 19) == 0) {
     ok = uc_emit(msg, "ExperimentalWarning", NULL);
   } else if (code->kind == SCR_DYN_STR) {
     if (!uc_codes_warned) {
@@ -246,9 +246,9 @@ static bool uc_deprecation_warn(ScrClosure *closure) {
       scr_atexit(uc_codes_warned_teardown);
     }
     const ScrStr *key = code->v.str;
-    if (!scr_dyn_obj_get(uc_codes_warned, key->data, key->len)) {
+    if (!scr_dyn_obj_get(uc_codes_warned, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len)) {
       ok = uc_emit(msg, "DeprecationWarning", key);
-      if (ok) scr_dyn_obj_set(uc_codes_warned, key->data, key->len, scr_dyn_new_bool(true));
+      if (ok) scr_dyn_obj_set(uc_codes_warned, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, scr_dyn_new_bool(true));
     }
   } else {
     ok = uc_emit(msg, "DeprecationWarning", NULL);
@@ -418,7 +418,7 @@ static void uc_last_argument_fail(const ScrDyn *got) {
   scr_jb_puts(&b, "The last argument must be of type function. Received ");
   scr_jb_puts(&b, received);
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_TYPE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_TYPE");
   scr_str_release(message);
 }
 
@@ -601,9 +601,9 @@ static ScrStr *uc_format(ScrDyn *const *args, size_t argc, bool colors) {
       scr_str_release(scr_jb_finish(&out));
       return scr_str_retain((ScrStr *)first);
     }
-    const char *text = first->data;
+    const char *text = scr_str_flat_view(first)->data;
     size_t last = 0;
-    for (size_t i = 0; first->len > 0 && i < first->len - 1; i++) {
+    for (size_t i = 0; scr_str_flat_view(first)->len > 0 && i < scr_str_flat_view(first)->len - 1; i++) {
       if (text[i] != '%') continue;
       int next = (unsigned char)text[++i];
       if (a + 1 != argc) {
@@ -649,7 +649,7 @@ static ScrStr *uc_format(ScrDyn *const *args, size_t argc, bool colors) {
     if (last != 0) {
       a++;
       join = " ";
-      if (last < first->len) scr_jb_write(&out, text + last, first->len - last);
+      if (last < scr_str_flat_view(first)->len) scr_jb_write(&out, text + last, scr_str_flat_view(first)->len - last);
     }
   }
   for (; a < argc; a++) {
@@ -768,14 +768,14 @@ static ScrDyn *uc_debug_impl(bool enabled, ScrDyn *set) {
   uc_debug_register();
   if (!uc_debug_impls) uc_debug_impls = scr_dyn_new_obj_null_proto();
   const ScrStr *key = set->v.str;
-  ScrDyn *impl = scr_dyn_obj_get(uc_debug_impls, key->data, key->len);
+  ScrDyn *impl = scr_dyn_obj_get(uc_debug_impls, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
   if (impl) return scr_dyn_retain(impl);
   if (enabled) {
-    if ((key->len == 4 && !memcmp(key->data, "HTTP", 4)) || (key->len == 5 && !memcmp(key->data, "HTTP2", 5))) {
+    if ((scr_str_flat_view(key)->len == 4 && !memcmp(scr_str_flat_view(key)->data, "HTTP", 4)) || (scr_str_flat_view(key)->len == 5 && !memcmp(scr_str_flat_view(key)->data, "HTTP2", 5))) {
       ScrJsonBuf warning;
       scr_jb_init(&warning);
       scr_jb_puts(&warning, "Setting the NODE_DEBUG environment variable to '");
-      scr_jb_puts(&warning, key->len == 4 ? "http" : "http2");
+      scr_jb_puts(&warning, scr_str_flat_view(key)->len == 4 ? "http" : "http2");
       scr_jb_puts(&warning, "' can expose sensitive data (such as passwords, tokens and authentication headers) in the resulting log.");
       ScrStr *text = scr_jb_finish(&warning);
       scr_process_emit_warning_text(text);
@@ -788,7 +788,7 @@ static ScrDyn *uc_debug_impl(bool enabled, ScrDyn *set) {
   } else {
     impl = scr_dyn_new_func(scr_closure_new(NULL, 0), uc_debug_noop, 0, "native:util.debuglog", "noop");
   }
-  scr_dyn_obj_set(uc_debug_impls, key->data, key->len, scr_dyn_retain(impl));
+  scr_dyn_obj_set(uc_debug_impls, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, scr_dyn_retain(impl));
   return impl;
 }
 

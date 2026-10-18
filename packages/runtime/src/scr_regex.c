@@ -77,8 +77,8 @@ static void scr_note_compiled(ScrRegex *re) {
  * g/i/m/s/u/y, so anything else here is a compiler bug. */
 static int scr_lre_flags(const ScrStr *flags) {
   int mask = 0;
-  for (size_t i = 0; i < flags->len; i++) {
-    switch (flags->data[i]) {
+  for (size_t i = 0; i < scr_str_flat_view(flags)->len; i++) {
+    switch (scr_str_flat_view(flags)->data[i]) {
       case 'g': mask |= LRE_FLAG_GLOBAL; break;
       case 'i': mask |= LRE_FLAG_IGNORECASE; break;
       case 'm': mask |= LRE_FLAG_MULTILINE; break;
@@ -88,7 +88,7 @@ static int scr_lre_flags(const ScrStr *flags) {
       case 'v': mask |= LRE_FLAG_UNICODE_SETS; break;
       default:
         scr_trap_fmt("scriptc: internal error: unexpected regex flag '%c'\n",
-                     flags->data[i]);
+                     scr_str_flat_view(flags)->data[i]);
     }
   }
   return mask;
@@ -103,26 +103,26 @@ static int scr_lre_flags(const ScrStr *flags) {
  * pattern needs no re-encoding (the common case — no copy). */
 static char *scr_pattern_cesu8(const ScrStr *src, size_t *plen) {
   bool has_astral = false;
-  for (size_t i = 0; i < src->len; i++) {
-    if ((unsigned char)src->data[i] >= 0xF0) {
+  for (size_t i = 0; i < scr_str_flat_view(src)->len; i++) {
+    if ((unsigned char)scr_str_flat_view(src)->data[i] >= 0xF0) {
       has_astral = true;
       break;
     }
   }
   if (!has_astral) return NULL;
-  char *out = malloc(src->len / 2 * 3 + src->len + 1); /* 4 bytes → 6 worst case */
+  char *out = malloc(scr_str_flat_view(src)->len / 2 * 3 + scr_str_flat_view(src)->len + 1); /* 4 bytes → 6 worst case */
   if (!out) scr_regex_oom();
   size_t o = 0;
-  for (size_t i = 0; i < src->len;) {
-    unsigned char c = (unsigned char)src->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(src)->len;) {
+    unsigned char c = (unsigned char)scr_str_flat_view(src)->data[i];
     if (c < 0xF0) {
-      out[o++] = src->data[i++];
+      out[o++] = scr_str_flat_view(src)->data[i++];
       continue;
     }
     uint32_t cp = ((uint32_t)(c & 0x07) << 18) |
-                  ((uint32_t)((unsigned char)src->data[i + 1] & 0x3F) << 12) |
-                  ((uint32_t)((unsigned char)src->data[i + 2] & 0x3F) << 6) |
-                  ((unsigned char)src->data[i + 3] & 0x3F);
+                  ((uint32_t)((unsigned char)scr_str_flat_view(src)->data[i + 1] & 0x3F) << 12) |
+                  ((uint32_t)((unsigned char)scr_str_flat_view(src)->data[i + 2] & 0x3F) << 6) |
+                  ((unsigned char)scr_str_flat_view(src)->data[i + 3] & 0x3F);
     i += 4;
     uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
     uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
@@ -152,19 +152,19 @@ static char *scr_pattern_cesu8(const ScrStr *src, size_t *plen) {
 static ScrStr *scr_regex_plain_text(const ScrRegex *re) {
   const ScrStr *flags = re->flags;
   bool fold = false;
-  for (size_t i = 0; i < flags->len; i++) {
-    if (flags->data[i] == 'y') return NULL;
-    if (flags->data[i] == 'i') fold = true;
+  for (size_t i = 0; i < scr_str_flat_view(flags)->len; i++) {
+    if (scr_str_flat_view(flags)->data[i] == 'y') return NULL;
+    if (scr_str_flat_view(flags)->data[i] == 'i') fold = true;
   }
   const ScrStr *src = re->source;
-  if (src->len == 0 || src->len > 256) return NULL;
+  if (scr_str_flat_view(src)->len == 0 || scr_str_flat_view(src)->len > 256) return NULL;
   char text[256];
   size_t n = 0;
-  for (size_t i = 0; i < src->len; i++) {
-    unsigned char c = (unsigned char)src->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(src)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(src)->data[i];
     if (c == '\\') {
-      if (i + 1 >= src->len) return NULL;
-      c = (unsigned char)src->data[++i];
+      if (i + 1 >= scr_str_flat_view(src)->len) return NULL;
+      c = (unsigned char)scr_str_flat_view(src)->data[++i];
       if (!strchr("^$\\.*+?()[]{}|/", c) || c == '\0') return NULL;
     } else if (c < 0x20 || c >= 0x7F || strchr("^$.*+?()[]{}|", c)) {
       return NULL;
@@ -176,11 +176,11 @@ static ScrStr *scr_regex_plain_text(const ScrRegex *re) {
   if (!lit) scr_regex_oom();
   memset(lit, 0, sizeof(ScrStr));
   lit->rc = SIZE_MAX;
-  lit->len = n;
+  scr_str_flat_view(lit)->len = n;
   lit->cap = (uint32_t)n;
   lit->ascii = 1;
-  memcpy(lit->data, text, n);
-  lit->data[n] = '\0';
+  memcpy(scr_str_flat_view(lit)->data, text, n);
+  scr_str_flat_view(lit)->data[n] = '\0';
   return lit;
 }
 
@@ -199,8 +199,8 @@ static uint8_t *scr_regex_bc(ScrRegex *re) {
     return re->bc;
   }
   int flags = scr_lre_flags(re->flags);
-  const char *pat = re->source->data;
-  size_t pat_len = re->source->len;
+  const char *pat = scr_str_flat_view(re->source)->data;
+  size_t pat_len = scr_str_flat_view(re->source)->len;
   char *cesu = NULL;
   if (!(flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS))) {
     cesu = scr_pattern_cesu8(re->source, &pat_len);
@@ -218,7 +218,7 @@ static uint8_t *scr_regex_bc(ScrRegex *re) {
      * rare). */
     fflush(stdout);
     scr_trap_fmt("scriptc: SyntaxError: Invalid regular expression: /%s/%s: %s\n",
-                 re->source->data, re->flags->data, error_msg);
+                 scr_str_flat_view(re->source)->data, scr_str_flat_view(re->flags)->data, error_msg);
   }
   re->bc = bc;
   re->native = scr_regex_native_build(re, bc);
@@ -288,8 +288,8 @@ double scr_regex_last_index(ScrRegex *re) { return re->last_index; }
 ScrStr *scr_regex_source(ScrRegex *re) { return scr_str_retain(re->source); }
 ScrStr *scr_regex_flags(ScrRegex *re) { return scr_str_retain(re->flags); }
 ScrStr *scr_regex_to_string(ScrRegex *re) {
-  const char *source = re->source->data;
-  size_t len = re->source->len;
+  const char *source = scr_str_flat_view(re->source)->data;
+  size_t len = scr_str_flat_view(re->source)->len;
   size_t escaped = 0;
   bool in_class = false;
   bool quoted = false;
@@ -307,7 +307,7 @@ ScrStr *scr_regex_to_string(ScrRegex *re) {
     if (c == '\\') quoted = !quoted;
     else quoted = false;
   }
-  size_t total = 2 + len + escaped + re->flags->len;
+  size_t total = 2 + len + escaped + scr_str_flat_view(re->flags)->len;
   char *buf = malloc(total + 1);
   if (!buf) scr_regex_oom();
   size_t pos = 0;
@@ -343,8 +343,8 @@ ScrStr *scr_regex_to_string(ScrRegex *re) {
     else quoted = false;
   }
   buf[pos++] = '/';
-  memcpy(buf + pos, re->flags->data, re->flags->len);
-  pos += re->flags->len;
+  memcpy(buf + pos, scr_str_flat_view(re->flags)->data, scr_str_flat_view(re->flags)->len);
+  pos += scr_str_flat_view(re->flags)->len;
   buf[pos] = '\0';
   ScrStr *out = scr_str_new(buf, pos);
   free(buf);
@@ -357,30 +357,30 @@ ScrStr *scr_regex_to_string(ScrRegex *re) {
  * WTF-8, so no validation; a lone surrogate decodes as its unit). Unit
  * count ≤ byte count. */
 static uint16_t *scr_to_utf16(const ScrStr *s, int *plen) {
-  if (s->len > (size_t)INT32_MAX - 1 || s->len > SIZE_MAX / sizeof(uint16_t))
+  if (scr_str_flat_view(s)->len > (size_t)INT32_MAX - 1 || scr_str_flat_view(s)->len > SIZE_MAX / sizeof(uint16_t))
     scr_regex_oom();
-  uint16_t *u = malloc((s->len ? s->len : 1) * sizeof(uint16_t));
+  uint16_t *u = malloc((scr_str_flat_view(s)->len ? scr_str_flat_view(s)->len : 1) * sizeof(uint16_t));
   if (!u) scr_regex_oom();
   int n = 0;
-  for (size_t i = 0; i < s->len;) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     uint32_t cp;
     if (c < 0x80) {
       cp = c;
       i += 1;
     } else if (c < 0xE0) {
-      cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s->data[i + 1] & 0x3F);
+      cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F);
       i += 2;
     } else if (c < 0xF0) {
       cp = ((uint32_t)(c & 0x0F) << 12) |
-           ((uint32_t)((unsigned char)s->data[i + 1] & 0x3F) << 6) |
-           ((unsigned char)s->data[i + 2] & 0x3F);
+           ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F) << 6) |
+           ((unsigned char)scr_str_flat_view(s)->data[i + 2] & 0x3F);
       i += 3;
     } else {
       cp = ((uint32_t)(c & 0x07) << 18) |
-           ((uint32_t)((unsigned char)s->data[i + 1] & 0x3F) << 12) |
-           ((uint32_t)((unsigned char)s->data[i + 2] & 0x3F) << 6) |
-           ((unsigned char)s->data[i + 3] & 0x3F);
+           ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F) << 12) |
+           ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 2] & 0x3F) << 6) |
+           ((unsigned char)scr_str_flat_view(s)->data[i + 3] & 0x3F);
       i += 4;
     }
     if (cp >= 0x10000) {
@@ -462,13 +462,13 @@ typedef struct ScrRegexInput {
 static bool scr_text_ascii(const ScrStr *s) {
   if (scr_str_known_ascii(s)) return true;
   size_t i = 0;
-  for (; s->len - i >= sizeof(uint64_t); i += sizeof(uint64_t)) {
+  for (; scr_str_flat_view(s)->len - i >= sizeof(uint64_t); i += sizeof(uint64_t)) {
     uint64_t word;
-    memcpy(&word, s->data + i, sizeof word);
+    memcpy(&word, scr_str_flat_view(s)->data + i, sizeof word);
     if (word & UINT64_C(0x8080808080808080)) return false;
   }
-  for (; i < s->len; i++) {
-    if ((unsigned char)s->data[i] >= 0x80) return false;
+  for (; i < scr_str_flat_view(s)->len; i++) {
+    if ((unsigned char)scr_str_flat_view(s)->data[i] >= 0x80) return false;
   }
   return true;
 }
@@ -482,14 +482,14 @@ static void scr_regex_input_registers(ScrRegexInput *input, const uint8_t *bc) {
 
 static void scr_regex_input_init(ScrRegexInput *input, const ScrRegex *re,
                                   const uint8_t *bc, const ScrStr *s) {
-  if (s->len > (size_t)INT32_MAX - 1) scr_regex_oom();
+  if (scr_str_flat_view(s)->len > (size_t)INT32_MAX - 1) scr_regex_oom();
   input->wide = !scr_text_ascii(s);
   input->native = input->wide ? NULL : (const ScrReNative *)re->native;
   input->matcher = input->wide ? NULL : scr_regex_matcher(re);
   input->utf16 = input->wide ? scr_to_utf16(s, &input->len) : NULL;
   input->borrowed_utf16 = false;
-  input->data = input->wide ? (const uint8_t *)input->utf16 : (const uint8_t *)s->data;
-  if (!input->wide) input->len = (int)s->len;
+  input->data = input->wide ? (const uint8_t *)input->utf16 : (const uint8_t *)scr_str_flat_view(s)->data;
+  if (!input->wide) input->len = (int)scr_str_flat_view(s)->len;
   scr_regex_input_registers(input, bc);
 }
 
@@ -521,14 +521,14 @@ static void scr_regex_subject_clear(void) {
 
 static void scr_regex_input_init_cached(ScrRegexInput *input, const ScrRegex *re,
                                          const uint8_t *bc, ScrStr *s) {
-  if (s->len < SCR_REGEX_SUBJECT_CACHE_MIN) {
+  if (scr_str_flat_view(s)->len < SCR_REGEX_SUBJECT_CACHE_MIN) {
     scr_regex_input_init(input, re, bc, s);
     return;
   }
   if (s != scr_subject_str) {
-    if (s->len > (size_t)INT32_MAX - 1) scr_regex_oom();
+    if (scr_str_flat_view(s)->len > (size_t)INT32_MAX - 1) scr_regex_oom();
     bool wide = !scr_text_ascii(s);
-    int len = (int)s->len;
+    int len = (int)scr_str_flat_view(s)->len;
     uint16_t *utf16 = wide ? scr_to_utf16(s, &len) : NULL;
     scr_regex_subject_clear();
     if (!scr_subject_armed) {
@@ -545,7 +545,7 @@ static void scr_regex_input_init_cached(ScrRegexInput *input, const ScrRegex *re
   input->matcher = input->wide ? NULL : scr_regex_matcher(re);
   input->utf16 = scr_subject_utf16;
   input->borrowed_utf16 = true;
-  input->data = input->wide ? (const uint8_t *)input->utf16 : (const uint8_t *)s->data;
+  input->data = input->wide ? (const uint8_t *)input->utf16 : (const uint8_t *)scr_str_flat_view(s)->data;
   input->len = scr_subject_len;
   scr_regex_input_registers(input, bc);
 }
@@ -600,8 +600,8 @@ __attribute__((noinline)) static ScrStr *scr_regex_span_utf16(const uint16_t *u,
   ScrStr *out = scr_str_alloc_raw(bytes, bytes);
   size_t offset = 0;
   for (int i = start; i < end;)
-    offset += scr_regex_encode(out->data + offset, scr_regex_codepoint(u, &i, end));
-  out->data[bytes] = '\0';
+    offset += scr_regex_encode(scr_str_flat_view(out)->data + offset, scr_regex_codepoint(u, &i, end));
+  scr_str_flat_view(out)->data[bytes] = '\0';
   return out;
 }
 
@@ -638,7 +638,7 @@ bool scr_regex_test(ScrRegex *re, ScrStr *s) {
   uint8_t *bc = scr_regex_bc(re);
   bool stateful = (lre_get_flags(bc) & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) != 0;
   const ScrStr *lit = scr_regex_lit(re);
-  if (lit && !stateful) return scr_str_find_bytes(s->data, s->len, lit->data, lit->len) != NULL;
+  if (lit && !stateful) return scr_str_find_bytes(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, scr_str_flat_view(lit)->data, scr_str_flat_view(lit)->len) != NULL;
   ScrRegexInput input;
   scr_regex_input_init_cached(&input, re, bc, s);
   int pos = stateful ? scr_regex_start(re, input.len) : 0;
@@ -775,14 +775,14 @@ static bool scr_regex_group_bytes(const ScrArr *m, double k, const char **p, siz
   size_t i = (size_t)(int64_t)k;
   if (m->present[i] == SCR_ARR_VALUE) {
     const ScrStr *str = (const ScrStr *)(uintptr_t)m->data[i];
-    *p = str->data;
-    *n = str->len;
+    *p = scr_str_flat_view(str)->data;
+    *n = scr_str_flat_view(str)->len;
     return true;
   }
   uint64_t span = m->data[i];
   if (m->present[i] != SCR_ARR_UNDEFINED || span == SCR_RE_NO_SPAN) return false;
   const ScrStr *subject = (const ScrStr *)(uintptr_t)m->data[m->len - 1];
-  *p = subject->data + (span >> 32);
+  *p = scr_str_flat_view(subject)->data + (span >> 32);
   *n = (size_t)((span & UINT32_MAX) - (span >> 32));
   return true;
 }
@@ -790,7 +790,7 @@ static bool scr_regex_group_bytes(const ScrArr *m, double k, const char **p, siz
 bool scr_regex_group_eq(ScrArr *m, double k, ScrStr *lit) {
   const char *p;
   size_t n;
-  return scr_regex_group_bytes(m, k, &p, &n) && n == lit->len && memcmp(p, lit->data, n) == 0;
+  return scr_regex_group_bytes(m, k, &p, &n) && n == scr_str_flat_view(lit)->len && memcmp(p, scr_str_flat_view(lit)->data, n) == 0;
 }
 
 double scr_regex_group_number(ScrArr *m, double k) {
@@ -854,12 +854,12 @@ double scr_regex_search(ScrStr *s, ScrRegex *re) {
   uint8_t *bc = scr_regex_bc(re);
   const ScrStr *lit = scr_regex_lit(re);
   if (lit) {
-    const char *hit = scr_str_find_bytes(s->data, s->len, lit->data, lit->len);
+    const char *hit = scr_str_find_bytes(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, scr_str_flat_view(lit)->data, scr_str_flat_view(lit)->len);
     if (!hit) return -1;
     /* UTF-16 units before the match: one per UTF-8 lead byte, two for an
      * astral (4-byte) lead. */
     double units = 0;
-    for (const char *p = s->data; p < hit; p++) {
+    for (const char *p = scr_str_flat_view(s)->data; p < hit; p++) {
       unsigned char c = (unsigned char)*p;
       if ((c & 0xC0) != 0x80) units += c >= 0xF0 ? 2 : 1;
     }
@@ -953,16 +953,16 @@ static void scr_put_substitution(ScrJsonBuf *b, const ScrRegexInput *input,
                                   int capture_count, const char *groupnames,
                                   const ScrStr *rep) {
   size_t i = 0;
-  while (i < rep->len) {
-    char c = rep->data[i];
-    if (c != '$' || i + 1 >= rep->len) {
-      const char *next = memchr(rep->data + i + 1, '$', rep->len - i - 1);
-      size_t end = next ? (size_t)(next - rep->data) : rep->len;
-      scr_jb_write(b, rep->data + i, end - i);
+  while (i < scr_str_flat_view(rep)->len) {
+    char c = scr_str_flat_view(rep)->data[i];
+    if (c != '$' || i + 1 >= scr_str_flat_view(rep)->len) {
+      const char *next = memchr(scr_str_flat_view(rep)->data + i + 1, '$', scr_str_flat_view(rep)->len - i - 1);
+      size_t end = next ? (size_t)(next - scr_str_flat_view(rep)->data) : scr_str_flat_view(rep)->len;
+      scr_jb_write(b, scr_str_flat_view(rep)->data + i, end - i);
       i = end;
       continue;
     }
-    char c1 = rep->data[i + 1];
+    char c1 = scr_str_flat_view(rep)->data[i + 1];
     if (c1 == '$') {
       scr_jb_putc(b, '$');
       i += 2;
@@ -978,8 +978,8 @@ static void scr_put_substitution(ScrJsonBuf *b, const ScrRegexInput *input,
     } else if (c1 >= '0' && c1 <= '9') {
       int k = c1 - '0';
       size_t adv = 2;
-      if (i + 2 < rep->len && rep->data[i + 2] >= '0' && rep->data[i + 2] <= '9') {
-        int k1 = k * 10 + (rep->data[i + 2] - '0');
+      if (i + 2 < scr_str_flat_view(rep)->len && scr_str_flat_view(rep)->data[i + 2] >= '0' && scr_str_flat_view(rep)->data[i + 2] <= '9') {
+        int k1 = k * 10 + (scr_str_flat_view(rep)->data[i + 2] - '0');
         if (k1 >= 1 && k1 < capture_count) {
           k = k1;
           adv = 3;
@@ -1000,13 +1000,13 @@ static void scr_put_substitution(ScrJsonBuf *b, const ScrRegexInput *input,
       /* $<name>: scan for '>'; absent, the '$' is literal (the rest
        * re-scans verbatim — GetSubstitution's not-found answer). */
       size_t gt = i + 2;
-      while (gt < rep->len && rep->data[gt] != '>') gt++;
-      if (gt >= rep->len) {
+      while (gt < scr_str_flat_view(rep)->len && scr_str_flat_view(rep)->data[gt] != '>') gt++;
+      if (gt >= scr_str_flat_view(rep)->len) {
         scr_jb_putc(b, '$');
         i++;
         continue;
       }
-      const char *name = rep->data + i + 2;
+      const char *name = scr_str_flat_view(rep)->data + i + 2;
       size_t name_len = gt - (i + 2);
       const char *p = groupnames; /* capture_count-1 entries: name NUL scope */
       for (int k = 1; k < capture_count; k++) {
@@ -1054,12 +1054,12 @@ static int scr_re_template_ops(const ScrStr *rep, int capture_count, bool named,
     if (n == SCR_RE_TEMPLATE_MAX) return -1;                                  \
     ops[n++] = (ScrReTemplateOp){ (cap), (int32_t)(o), (int32_t)(l) };       \
   } while (0)
-  while (i < rep->len) {
-    if (rep->data[i] != '$' || i + 1 >= rep->len) {
+  while (i < scr_str_flat_view(rep)->len) {
+    if (scr_str_flat_view(rep)->data[i] != '$' || i + 1 >= scr_str_flat_view(rep)->len) {
       i++;
       continue;
     }
-    char c1 = rep->data[i + 1];
+    char c1 = scr_str_flat_view(rep)->data[i + 1];
     if (c1 == '$') {
       SCR_RE_OP(-1, run, i + 1 - run); /* keep one '$' */
       i += 2;
@@ -1072,8 +1072,8 @@ static int scr_re_template_ops(const ScrStr *rep, int capture_count, bool named,
     } else if (c1 >= '0' && c1 <= '9') {
       int k = c1 - '0';
       size_t adv = 2;
-      if (i + 2 < rep->len && rep->data[i + 2] >= '0' && rep->data[i + 2] <= '9') {
-        int k1 = k * 10 + (rep->data[i + 2] - '0');
+      if (i + 2 < scr_str_flat_view(rep)->len && scr_str_flat_view(rep)->data[i + 2] >= '0' && scr_str_flat_view(rep)->data[i + 2] <= '9') {
+        int k1 = k * 10 + (scr_str_flat_view(rep)->data[i + 2] - '0');
         if (k1 >= 1 && k1 < capture_count) {
           k = k1;
           adv = 3;
@@ -1112,9 +1112,9 @@ static ScrReOut scr_re_out_grow(ScrReOut o, size_t n) {
   size_t cap = o.cap * 2;
   if (cap < o.len + n) cap = o.len + n;
   if (cap > SCR_STR_MAX_CAP) cap = SCR_STR_MAX_CAP;
-  o.s->len = o.len;
+  scr_str_flat_view(o.s)->len = o.len;
   o.s = scr_str_regrow(o.s, cap);
-  o.data = o.s->data;
+  o.data = scr_str_flat_view(o.s)->data;
   o.cap = o.s->cap;
   return o;
 }
@@ -1135,7 +1135,7 @@ static ScrStr *scr_replace_matcher(ScrStr *s, ScrRegex *re, ScrStr *rep,
   if (nops < 0) return NULL;
   /* A template without captures is one literal run (or none). */
   bool plain = nops == 0 || (nops == 1 && ops[0].capture < 0);
-  const char *plain_text = nops ? rep->data + ops[0].off : NULL;
+  const char *plain_text = nops ? scr_str_flat_view(rep)->data + ops[0].off : NULL;
   size_t plain_len = nops ? (size_t)ops[0].len : 0;
   ScrRegexMatcherFn matcher = input->matcher;
   const uint8_t *data = input->data;
@@ -1154,7 +1154,7 @@ static ScrStr *scr_replace_matcher(ScrStr *s, ScrRegex *re, ScrStr *rep,
     if (sticky && !global) re->last_index = end;
     if (!out.s) {
       out.s = scr_str_alloc_raw(0, (size_t)len + 16);
-      out.data = out.s->data;
+      out.data = scr_str_flat_view(out.s)->data;
       out.cap = out.s->cap;
     }
     scr_re_out_put(&out, text + next, (size_t)(start - next));
@@ -1164,7 +1164,7 @@ static ScrStr *scr_replace_matcher(ScrStr *s, ScrRegex *re, ScrStr *rep,
       for (int i = 0; i < nops; i++) {
         const ScrReTemplateOp *op = &ops[i];
         if (op->capture < 0) {
-          scr_re_out_put(&out, rep->data + op->off, (size_t)op->len);
+          scr_re_out_put(&out, scr_str_flat_view(rep)->data + op->off, (size_t)op->len);
         } else {
           const uint8_t *cs = capture[2 * op->capture], *ce = capture[2 * op->capture + 1];
           if (cs && ce) scr_re_out_put(&out, (const char *)cs, (size_t)(ce - cs));
@@ -1178,14 +1178,14 @@ static ScrStr *scr_replace_matcher(ScrStr *s, ScrRegex *re, ScrStr *rep,
   }
   if (!out.s) return scr_str_retain(s);
   scr_re_out_put(&out, text + next, (size_t)(len - next));
-  out.s->len = out.len;
+  scr_str_flat_view(out.s)->len = out.len;
   out.data[out.len] = '\0';
   /* The subject is ASCII, so a surrogate pair can only form where two
    * substitutions meet: one ending in a lone high half, the next starting
    * with a lone low half. */
-  if (scr_wtf8_any() && memchr(rep->data, 0xED, rep->len))
+  if (scr_wtf8_any() && memchr(scr_str_flat_view(rep)->data, 0xED, scr_str_flat_view(rep)->len))
     scr_str_fuse_surrogates(out.s);
-  else if (scr_str_known_ascii(rep) || scr_bytes_all_ascii(rep->data, rep->len))
+  else if (scr_str_known_ascii(rep) || scr_bytes_all_ascii(scr_str_flat_view(rep)->data, scr_str_flat_view(rep)->len))
     scr_str_note_ascii(out.s);
   return out.s;
 }
@@ -1204,7 +1204,7 @@ static ScrStr *scr_replace_impl(ScrStr *s, ScrRegex *re, ScrStr *rep) {
     /* A plain-text pattern has no captures, so its substitutions are the
      * string-search ones. */
     if (global) re->last_index = 0;
-    return scr_str_replace_bytes(s, lit->data, lit->len, rep, global);
+    return scr_str_replace_bytes(s, scr_str_flat_view(lit)->data, scr_str_flat_view(lit)->len, rep, global);
   }
   int capture_count = lre_get_capture_count(bc);
   const char *groupnames = lre_get_groupnames(bc);
@@ -1227,7 +1227,7 @@ static ScrStr *scr_replace_impl(ScrStr *s, ScrRegex *re, ScrStr *rep) {
   if (pos < 0) pos = len + 1;
   if (sticky && !global) re->last_index = 0;
   bool matched = false;
-  bool literal = memchr(rep->data, '$', rep->len) == NULL;
+  bool literal = memchr(scr_str_flat_view(rep)->data, '$', scr_str_flat_view(rep)->len) == NULL;
   while (pos <= len) {
     if (scr_exec(&input, bc, pos) != 1) break;
     matched = true;
@@ -1242,7 +1242,7 @@ static ScrStr *scr_replace_impl(ScrStr *s, ScrRegex *re, ScrStr *rep) {
     pos = end == start ? scr_advance(&input, end, unicode) : end;
   }
   if (matched) scr_regex_put_span(&b, &input, next, len);
-  bool ascii = !input.wide && (scr_str_known_ascii(rep) || scr_bytes_all_ascii(rep->data, rep->len));
+  bool ascii = !input.wide && (scr_str_known_ascii(rep) || scr_bytes_all_ascii(scr_str_flat_view(rep)->data, scr_str_flat_view(rep)->len));
   scr_regex_input_dispose(&input);
   if (!matched) return scr_str_retain(s);
   ScrStr *out = scr_jb_finish(&b);
@@ -1573,8 +1573,8 @@ ScrStr *scr_util_strip_vt(const ScrDyn *input) {
     return NULL;
   }
   ScrStr *subject = input->v.str;
-  const unsigned char *d = (const unsigned char *)subject->data;
-  size_t len = subject->len;
+  const unsigned char *d = (const unsigned char *)scr_str_flat_view(subject)->data;
+  size_t len = scr_str_flat_view(subject)->len;
   bool escape = false;
   for (size_t i = 0; i < len; i++) {
     if (d[i] == 0x1b || (d[i] == 0xc2 && i + 1 < len && d[i + 1] == 0x9b)) {
@@ -1764,10 +1764,10 @@ static uint32_t scr_case_prev(const ScrStr *s, size_t *off) {
   size_t i = *off;
   do {
     i--;
-  } while (i > 0 && ((unsigned char)s->data[i] & 0xC0) == 0x80);
+  } while (i > 0 && ((unsigned char)scr_str_flat_view(s)->data[i] & 0xC0) == 0x80);
   *off = i;
   size_t adv;
-  return scr_case_decode(s->data + i, &adv);
+  return scr_case_decode(scr_str_flat_view(s)->data + i, &adv);
 }
 
 /* Unicode Final_Sigma: Σ is preceded by a cased letter (after skipping
@@ -1785,9 +1785,9 @@ static bool scr_final_sigma(const ScrStr *s, size_t sigma_off, size_t next_off) 
   if (!lre_is_cased(c1)) return false;
   k = next_off;
   for (;;) {
-    if (k >= s->len) return true;
+    if (k >= scr_str_flat_view(s)->len) return true;
     size_t adv;
-    c1 = scr_case_decode(s->data + k, &adv);
+    c1 = scr_case_decode(scr_str_flat_view(s)->data + k, &adv);
     k += adv;
     if (!lre_is_case_ignorable(c1)) break;
   }
@@ -1818,28 +1818,28 @@ static ScrStr *scr_str_case_conv(const ScrStr *s, int to_lower) {
   unsigned char last = to_lower ? 'Z' : 'z';
   if (scr_text_ascii(s)) {
     size_t changed = 0;
-    while (changed < s->len &&
-           ((unsigned char)s->data[changed] < first || (unsigned char)s->data[changed] > last))
+    while (changed < scr_str_flat_view(s)->len &&
+           ((unsigned char)scr_str_flat_view(s)->data[changed] < first || (unsigned char)scr_str_flat_view(s)->data[changed] > last))
       changed++;
-    if (changed == s->len) return scr_str_retain((ScrStr *)s);
-    ScrStr *out = scr_str_alloc_raw(s->len, s->len);
-    memcpy(out->data, s->data, changed);
-    for (size_t i = changed; i < s->len; i++) {
-      unsigned char c = (unsigned char)s->data[i];
-      out->data[i] = (char)(c >= first && c <= last ? c ^ 0x20 : c);
+    if (changed == scr_str_flat_view(s)->len) return scr_str_retain((ScrStr *)s);
+    ScrStr *out = scr_str_alloc_raw(scr_str_flat_view(s)->len, scr_str_flat_view(s)->len);
+    memcpy(scr_str_flat_view(out)->data, scr_str_flat_view(s)->data, changed);
+    for (size_t i = changed; i < scr_str_flat_view(s)->len; i++) {
+      unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
+      scr_str_flat_view(out)->data[i] = (char)(c >= first && c <= last ? c ^ 0x20 : c);
     }
-    out->data[s->len] = '\0';
+    scr_str_flat_view(out)->data[scr_str_flat_view(s)->len] = '\0';
     return out;
   }
   ScrJsonBuf b;
   scr_jb_init(&b);
   uint32_t res[LRE_CC_RES_LEN_MAX];
-  for (size_t i = 0; i < s->len;) {
-    if ((unsigned char)s->data[i] < 0x80) {
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
+    if ((unsigned char)scr_str_flat_view(s)->data[i] < 0x80) {
       size_t start = i;
-      while (i < s->len && (unsigned char)s->data[i] < 0x80) i++;
+      while (i < scr_str_flat_view(s)->len && (unsigned char)scr_str_flat_view(s)->data[i] < 0x80) i++;
       size_t output = b.len;
-      scr_jb_write(&b, s->data + start, i - start);
+      scr_jb_write(&b, scr_str_flat_view(s)->data + start, i - start);
       for (size_t j = output; j < b.len; j++) {
         unsigned char c = (unsigned char)b.data[j];
         if (c >= first && c <= last) b.data[j] = (char)(c ^ 0x20);
@@ -1847,7 +1847,7 @@ static ScrStr *scr_str_case_conv(const ScrStr *s, int to_lower) {
       continue;
     }
     size_t adv;
-    uint32_t c = scr_case_decode(s->data + i, &adv);
+    uint32_t c = scr_case_decode(scr_str_flat_view(s)->data + i, &adv);
     int l;
     if (c == 0x3a3 && to_lower && scr_final_sigma(s, i, i + adv)) {
       res[0] = 0x3c2; /* final sigma */
@@ -1872,10 +1872,10 @@ static void *scr_normalize_realloc(void *opaque, void *ptr, size_t size) {
 
 ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form) {
   UnicodeNormalizationEnum mode;
-  if (form->len == 3 && !memcmp(form->data, "NFC", 3)) mode = UNICODE_NFC;
-  else if (form->len == 3 && !memcmp(form->data, "NFD", 3)) mode = UNICODE_NFD;
-  else if (form->len == 4 && !memcmp(form->data, "NFKC", 4)) mode = UNICODE_NFKC;
-  else if (form->len == 4 && !memcmp(form->data, "NFKD", 4)) mode = UNICODE_NFKD;
+  if (scr_str_flat_view(form)->len == 3 && !memcmp(scr_str_flat_view(form)->data, "NFC", 3)) mode = UNICODE_NFC;
+  else if (scr_str_flat_view(form)->len == 3 && !memcmp(scr_str_flat_view(form)->data, "NFD", 3)) mode = UNICODE_NFD;
+  else if (scr_str_flat_view(form)->len == 4 && !memcmp(scr_str_flat_view(form)->data, "NFKC", 4)) mode = UNICODE_NFKC;
+  else if (scr_str_flat_view(form)->len == 4 && !memcmp(scr_str_flat_view(form)->data, "NFKD", 4)) mode = UNICODE_NFKD;
   else {
     static const char message[] = "The normalization form should be one of NFC, NFD, NFKC, NFKD.";
     scr_throw_error(SCR_ERR_RANGE, scr_str_new(message, sizeof message - 1));
@@ -1884,13 +1884,13 @@ ScrStr *scr_str_normalize(const ScrStr *s, const ScrStr *form) {
   /* Every ASCII string is already normalized in all four forms. Validate
    * the form first: even an empty subject must reject an invalid form. */
   if (scr_text_ascii(s)) return scr_str_retain((ScrStr *)s);
-  if (s->len > INT32_MAX / sizeof(uint32_t)) scr_regex_oom();
-  uint32_t *input = malloc((s->len + 1) * sizeof(uint32_t));
+  if (scr_str_flat_view(s)->len > INT32_MAX / sizeof(uint32_t)) scr_regex_oom();
+  uint32_t *input = malloc((scr_str_flat_view(s)->len + 1) * sizeof(uint32_t));
   if (!input) scr_regex_oom();
   int length = 0;
-  for (size_t offset = 0; offset < s->len;) {
+  for (size_t offset = 0; offset < scr_str_flat_view(s)->len;) {
     size_t step;
-    input[length++] = scr_case_decode(s->data + offset, &step);
+    input[length++] = scr_case_decode(scr_str_flat_view(s)->data + offset, &step);
     offset += step;
   }
   uint32_t *output = NULL;
@@ -1923,17 +1923,17 @@ static bool scr_assert_regex_hits(ScrRegex *re, ScrStr *s) {
 /* The regex's own inspection — /source/ + FLAGS IN GETTER ORDER
  * (dgimsuvy), not source order. +1. */
 static ScrStr *scr_assert_regex_render(ScrRegex *re) {
-  size_t cap = re->source->len + re->flags->len + 2;
+  size_t cap = scr_str_flat_view(re->source)->len + scr_str_flat_view(re->flags)->len + 2;
   char *buf = malloc(cap);
   if (!buf) scr_trap("scriptc: out of memory\n");
   size_t n = 0;
   buf[n++] = '/';
-  memcpy(buf + n, re->source->data, re->source->len);
-  n += re->source->len;
+  memcpy(buf + n, scr_str_flat_view(re->source)->data, scr_str_flat_view(re->source)->len);
+  n += scr_str_flat_view(re->source)->len;
   buf[n++] = '/';
   for (const char *f = "dgimsuvy"; *f; f++) {
-    for (size_t i = 0; i < re->flags->len; i++) {
-      if (re->flags->data[i] == *f) buf[n++] = *f;
+    for (size_t i = 0; i < scr_str_flat_view(re->flags)->len; i++) {
+      if (scr_str_flat_view(re->flags)->data[i] == *f) buf[n++] = *f;
     }
   }
   ScrStr *out = scr_str_new(buf, n);
@@ -1951,18 +1951,18 @@ static void scr_assert_regex_input_fail(bool negated, ScrRegex *re, ScrStr *inpu
       ? "The input was expected to not match the regular expression "
       : "The input did not match the regular expression ";
   const char *mid = ". Input:\n\n";
-  size_t cap = strlen(head) + rre->len + strlen(mid) + insp->len + 1;
+  size_t cap = strlen(head) + scr_str_flat_view(rre)->len + strlen(mid) + scr_str_flat_view(insp)->len + 1;
   char *buf = malloc(cap);
   if (!buf) scr_trap("scriptc: out of memory\n");
   size_t n = 0;
   memcpy(buf + n, head, strlen(head));
   n += strlen(head);
-  memcpy(buf + n, rre->data, rre->len);
-  n += rre->len;
+  memcpy(buf + n, scr_str_flat_view(rre)->data, scr_str_flat_view(rre)->len);
+  n += scr_str_flat_view(rre)->len;
   memcpy(buf + n, mid, strlen(mid));
   n += strlen(mid);
-  memcpy(buf + n, insp->data, insp->len);
-  n += insp->len;
+  memcpy(buf + n, scr_str_flat_view(insp)->data, scr_str_flat_view(insp)->len);
+  n += scr_str_flat_view(insp)->len;
   buf[n++] = '\n';
   scr_str_release(insp);
   scr_str_release(rre);
@@ -1976,7 +1976,7 @@ void scr_assert_match(ScrStr *s, ScrRegex *re, bool negated, ScrStr *msg,
   bool matched = scr_assert_regex_hits(re, s);
   if (negated ? !matched : matched) return;
   scr_assert_record(scr_dyn_new_str(s), scr_dyn_native_regex(re), negated ? "doesNotMatch" : "match");
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     scr_assert_fail(scr_str_retain(msg), false);
     return;
   }
@@ -1996,7 +1996,7 @@ void scr_assert_throws_regex(ScrRegex *re, ScrError *err, ScrStr *msg, bool has_
   }
   scr_assert_record(scr_dyn_from_error(err), scr_dyn_native_regex(re),
                     rejection ? "rejects" : "throws");
-  if (has_msg && msg->len > 0) {
+  if (has_msg && scr_str_flat_view(msg)->len > 0) {
     scr_str_release(str);
     scr_assert_fail(scr_str_retain(msg), false);
     return;
@@ -2071,21 +2071,21 @@ static SCR_TL size_t scr_regex_ctor_count;
 
 static uint64_t scr_regex_ctor_hash(const ScrStr *source, const ScrStr *flags) {
   uint64_t h = UINT64_C(1469598103934665603);
-  for (size_t i = 0; i < flags->len; i++) h = (h ^ (unsigned char)flags->data[i]) * UINT64_C(1099511628211);
+  for (size_t i = 0; i < scr_str_flat_view(flags)->len; i++) h = (h ^ (unsigned char)scr_str_flat_view(flags)->data[i]) * UINT64_C(1099511628211);
   h = (h ^ 0xFF) * UINT64_C(1099511628211);
-  for (size_t i = 0; i < source->len; i++) h = (h ^ (unsigned char)source->data[i]) * UINT64_C(1099511628211);
+  for (size_t i = 0; i < scr_str_flat_view(source)->len; i++) h = (h ^ (unsigned char)scr_str_flat_view(source)->data[i]) * UINT64_C(1099511628211);
   return h;
 }
 
 static bool scr_regex_ctor_matches(const ScrRegexCtorEntry *e, uint64_t hash,
                                    const ScrStr *source, const ScrStr *flags) {
-  return e->hash == hash && e->key_len == flags->len + 1 + source->len &&
-         memcmp(e->key, flags->data, flags->len) == 0 && e->key[flags->len] == '\0' &&
-         memcmp(e->key + flags->len + 1, source->data, source->len) == 0;
+  return e->hash == hash && e->key_len == scr_str_flat_view(flags)->len + 1 + scr_str_flat_view(source)->len &&
+         memcmp(e->key, scr_str_flat_view(flags)->data, scr_str_flat_view(flags)->len) == 0 && e->key[scr_str_flat_view(flags)->len] == '\0' &&
+         memcmp(e->key + scr_str_flat_view(flags)->len + 1, scr_str_flat_view(source)->data, scr_str_flat_view(source)->len) == 0;
 }
 
 static ScrRegex *scr_regex_ctor_lookup(const ScrStr *source, const ScrStr *flags) {
-  if (!scr_regex_ctor_table || source->len > SCR_REGEX_CTOR_SOURCE_MAX) return NULL;
+  if (!scr_regex_ctor_table || scr_str_flat_view(source)->len > SCR_REGEX_CTOR_SOURCE_MAX) return NULL;
   uint64_t hash = scr_regex_ctor_hash(source, flags);
   for (size_t i = hash & (SCR_REGEX_CTOR_CAP - 1);; i = (i + 1) & (SCR_REGEX_CTOR_CAP - 1)) {
     ScrRegexCtorEntry *e = &scr_regex_ctor_table[i];
@@ -2101,13 +2101,13 @@ static void scr_regex_ctor_remember(ScrRegex *re) {
 #ifdef SCR_WORKERS
   (void)re;
 #else
-  if (re->source->len > SCR_REGEX_CTOR_SOURCE_MAX || scr_regex_ctor_count >= SCR_REGEX_CTOR_MAX)
+  if (scr_str_flat_view(re->source)->len > SCR_REGEX_CTOR_SOURCE_MAX || scr_regex_ctor_count >= SCR_REGEX_CTOR_MAX)
     return;
   if (!scr_regex_ctor_table) {
     scr_regex_ctor_table = calloc(SCR_REGEX_CTOR_CAP, sizeof *scr_regex_ctor_table);
     if (!scr_regex_ctor_table) return;
   }
-  size_t key_len = re->flags->len + 1 + re->source->len;
+  size_t key_len = scr_str_flat_view(re->flags)->len + 1 + scr_str_flat_view(re->source)->len;
   char *key = malloc(key_len);
   ScrRegex *shared = calloc(1, sizeof *shared);
   if (!key || !shared) {
@@ -2115,9 +2115,9 @@ static void scr_regex_ctor_remember(ScrRegex *re) {
     free(shared);
     return;
   }
-  memcpy(key, re->flags->data, re->flags->len);
-  key[re->flags->len] = '\0';
-  memcpy(key + re->flags->len + 1, re->source->data, re->source->len);
+  memcpy(key, scr_str_flat_view(re->flags)->data, scr_str_flat_view(re->flags)->len);
+  key[scr_str_flat_view(re->flags)->len] = '\0';
+  memcpy(key + scr_str_flat_view(re->flags)->len + 1, scr_str_flat_view(re->source)->data, scr_str_flat_view(re->source)->len);
   shared->rc = SIZE_MAX;
   shared->bc = re->bc;
   shared->native = re->native;
@@ -2133,9 +2133,9 @@ static void scr_regex_ctor_remember(ScrRegex *re) {
 
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   unsigned seen_flags = 0;
-  for (size_t i = 0; i < flags->len; i++) {
+  for (size_t i = 0; i < scr_str_flat_view(flags)->len; i++) {
     unsigned flag = 0;
-    switch (flags->data[i]) {
+    switch (scr_str_flat_view(flags)->data[i]) {
     case 'g': flag = 1u << 0; break;
     case 'i': flag = 1u << 1; break;
     case 'm': flag = 1u << 2; break;
@@ -2150,7 +2150,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
       char msg[80];
       int n = snprintf(msg, sizeof msg,
                        "Invalid flags supplied to RegExp constructor '%.20s'",
-                       flags->data);
+                       scr_str_flat_view(flags)->data);
       scr_throw_error_msg(SCR_ERR_SYNTAX, msg, (size_t)n);
       return NULL;
     }
@@ -2159,7 +2159,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   if ((seen_flags & (1u << 4)) && (seen_flags & (1u << 7))) {
     char msg[80];
     int n = snprintf(msg, sizeof msg, "Invalid flags supplied to RegExp constructor '%.20s'",
-                     flags->data);
+                     scr_str_flat_view(flags)->data);
     scr_throw_error_msg(SCR_ERR_SYNTAX, msg, (size_t)n);
     return NULL;
   }
@@ -2175,7 +2175,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
     scr_trap("scriptc: out of memory\n");
   }
   re->rc = 1;
-  re->source = pattern->len > 0 ? scr_str_retain(pattern) : scr_str_new("(?:)", 4);
+  re->source = scr_str_flat_view(pattern)->len > 0 ? scr_str_retain(pattern) : scr_str_new("(?:)", 4);
   /* Public flags use getter order, independently of constructor spelling.
    * Validate first so duplicates and invalid flags retain their errors. */
   char canonical[8];
@@ -2184,7 +2184,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   for (unsigned i = 0; i < sizeof order_bits / sizeof order_bits[0]; i++) {
     if (seen_flags & (1u << order_bits[i])) canonical[flag_count++] = "gimsuvy"[i];
   }
-  re->flags = flag_count == flags->len && memcmp(canonical, flags->data, flag_count) == 0
+  re->flags = flag_count == scr_str_flat_view(flags)->len && memcmp(canonical, scr_str_flat_view(flags)->data, flag_count) == 0
     ? scr_str_retain(flags) : scr_str_new(canonical, flag_count);
   ScrRegex *shared = scr_regex_ctor_lookup(re->source, re->flags);
   if (shared) {
@@ -2196,8 +2196,8 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   /* Eager compile — the literal path stays lazy (its failure is an
    * abort; tsc already parsed those patterns). */
   int lre_flags = scr_lre_flags(re->flags);
-  const char *pat = re->source->data;
-  size_t pat_len = re->source->len;
+  const char *pat = scr_str_flat_view(re->source)->data;
+  size_t pat_len = scr_str_flat_view(re->source)->len;
   char *cesu = NULL;
   if (!(lre_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS))) {
     cesu = scr_pattern_cesu8(re->source, &pat_len);
@@ -2211,7 +2211,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   if (!bc) {
     char msg[192];
     int n = snprintf(msg, sizeof msg, "Invalid regular expression: /%.64s/%.8s: %s",
-                     re->source->data, re->flags->data, error_msg);
+                     scr_str_flat_view(re->source)->data, scr_str_flat_view(re->flags)->data, error_msg);
     scr_str_release(re->source);
     scr_str_release(re->flags);
     free(re);
@@ -2301,23 +2301,23 @@ ScrStr *scr_regexp_escape(ScrStr *s) {
   static const char hex[] = "0123456789abcdef";
   size_t out_len = 0;
   bool first = true;
-  for (size_t i = 0; i < s->len;) {
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
     size_t adv;
-    uint32_t cp = scr_re_utf8_decode(s->data + i, &adv);
+    uint32_t cp = scr_re_utf8_decode(scr_str_flat_view(s)->data + i, &adv);
     out_len += scr_regexp_escape_len(cp, first, adv);
     first = false;
     i += adv;
   }
-  if (out_len == s->len) return scr_str_retain(s); /* nothing escapes — share */
+  if (out_len == scr_str_flat_view(s)->len) return scr_str_retain(s); /* nothing escapes — share */
   ScrStr *out = scr_str_alloc_raw(out_len, out_len);
-  char *w = out->data;
+  char *w = scr_str_flat_view(out)->data;
   first = true;
-  for (size_t i = 0; i < s->len;) {
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
     size_t adv;
-    uint32_t cp = scr_re_utf8_decode(s->data + i, &adv);
+    uint32_t cp = scr_re_utf8_decode(scr_str_flat_view(s)->data + i, &adv);
     size_t enc = scr_regexp_escape_len(cp, first, adv);
     if (enc == adv) { /* pass-through: an escape's length never matches raw */
-      memcpy(w, s->data + i, adv);
+      memcpy(w, scr_str_flat_view(s)->data + i, adv);
       w += adv;
     } else if (enc == 2) {
       char ctl = scr_regexp_control_escape(cp);
@@ -2339,8 +2339,8 @@ ScrStr *scr_regexp_escape(ScrStr *s) {
     first = false;
     i += adv;
   }
-  out->len = out_len;
-  out->data[out_len] = '\0';
+  scr_str_flat_view(out)->len = out_len;
+  scr_str_flat_view(out)->data[out_len] = '\0';
   return out;
 }
 
@@ -2372,7 +2372,7 @@ static ScrDyn *scr_native_regex_get(void *ptr, const char *key, size_t len) {
   };
   for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++) {
     if (strlen(flags[i].name) == len && memcmp(key, flags[i].name, len) == 0)
-      return scr_dyn_new_bool(memchr(re->flags->data, flags[i].flag, re->flags->len) != NULL);
+      return scr_dyn_new_bool(memchr(scr_str_flat_view(re->flags)->data, flags[i].flag, scr_str_flat_view(re->flags)->len) != NULL);
   }
   static const char *const methods[] = {"test", "exec", "toString", "compile"};
   for (size_t i = 0; i < sizeof methods / sizeof methods[0]; i++) {

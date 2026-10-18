@@ -17,7 +17,7 @@ static bool util_deep_refused(const char *kind) {
   scr_jb_puts(&message, kind);
   scr_jb_puts(&message, " is not supported yet");
   ScrStr *text = scr_jb_finish(&message);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, text->data, text->len, "SC2020");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "SC2020");
   scr_str_release(text);
   return false;
 }
@@ -172,7 +172,7 @@ static bool util_deep_equal(const ScrDyn *a, const ScrDyn *b, bool skip,
     if (!same && !scr_exc_pending() && a->kind == SCR_DYN_OBJ &&
         (x->kind == SCR_DYN_UNDEF || y->kind == SCR_DYN_UNDEF)) {
       const ScrDyn *tag = x->kind == SCR_DYN_UNDEF ? y : x;
-      same = tag->kind != SCR_DYN_STR || (tag->v.str->len == 6 && !memcmp(tag->v.str->data, "Object", 6));
+      same = tag->kind != SCR_DYN_STR || (scr_str_flat_view(tag->v.str)->len == 6 && !memcmp(scr_str_flat_view(tag->v.str)->data, "Object", 6));
     }
     scr_dyn_release(x); scr_dyn_release(y);
     if (!same) return false;

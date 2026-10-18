@@ -56,18 +56,18 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_BOOL: scr_jb_puts(b, d->v.b ? "true" : "false"); return;
   case SCR_DYN_BIGINT: {
     ScrStr *s = scr_bigint_to_string(d->v.bigint, 10);
-    scr_jb_write(b, s->data, s->len);
+    scr_jb_write(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
     scr_str_release(s);
     return;
   }
   case SCR_DYN_NUM: {
     ScrStr *s = scr_f64_to_scrstr(d->v.num);
-    scr_jb_write(b, s->data, s->len);
+    scr_jb_write(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
     scr_str_release(s);
     return;
   }
   case SCR_DYN_STR:
-    scr_jb_write(b, d->v.str->data, d->v.str->len);
+    scr_jb_write(b, scr_str_flat_view(d->v.str)->data, scr_str_flat_view(d->v.str)->len);
     return;
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) {
@@ -84,7 +84,7 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
     if (marker) {
       ScrStr *text = scr_dyn_error_string(d);
       if (!text) return;
-      scr_jb_write(b, text->data, text->len);
+      scr_jb_write(b, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
       scr_str_release(text);
       return;
     }
@@ -98,14 +98,14 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
       ScrStr *enc = scr_str_new("utf8", 4);
       ScrStr *txt = scr_bytes_to_str(d->v.bytes, enc);
       scr_str_release(enc);
-      scr_jb_write(b, txt->data, txt->len);
+      scr_jb_write(b, scr_str_flat_view(txt)->data, scr_str_flat_view(txt)->len);
       scr_str_release(txt);
       return;
     }
     for (size_t i = 0; i < d->v.bytes->len; i++) {
       if (i > 0) scr_jb_putc(b, ',');
       ScrStr *n = scr_f64_to_scrstr(scr_bytes_get(d->v.bytes, (double)i));
-      scr_jb_write(b, n->data, n->len);
+      scr_jb_write(b, scr_str_flat_view(n)->data, scr_str_flat_view(n)->len);
       scr_str_release(n);
     }
     return;
@@ -116,7 +116,7 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
     return;
   case SCR_DYN_HANDLE: {
     ScrStr *s = scr_dyn_to_string(d, NULL);
-    scr_jb_write(b, s->data, s->len);
+    scr_jb_write(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
     scr_str_release(s);
     return;
   }
@@ -225,14 +225,14 @@ static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
 
 static bool dyn_borrow_is(const ScrStr *method, const char *name) {
   size_t len = strlen(name);
-  return method->len == len && memcmp(method->data, name, len) == 0;
+  return scr_str_flat_view(method)->len == len && memcmp(scr_str_flat_view(method)->data, name, len) == 0;
 }
 
 static bool dyn_borrow_index(const ScrStr *key, size_t *out) {
-  if (!key->len || (key->len > 1 && key->data[0] == '0')) return false;
+  if (!scr_str_flat_view(key)->len || (scr_str_flat_view(key)->len > 1 && scr_str_flat_view(key)->data[0] == '0')) return false;
   size_t n = 0;
-  for (size_t i = 0; i < key->len; i++) {
-    unsigned digit = (unsigned)(key->data[i] - '0');
+  for (size_t i = 0; i < scr_str_flat_view(key)->len; i++) {
+    unsigned digit = (unsigned)(scr_str_flat_view(key)->data[i] - '0');
     if (digit > 9 || n > (SIZE_MAX - digit) / 10) return false;
     n = n * 10 + digit;
   }
@@ -248,15 +248,15 @@ static ScrDyn *dyn_borrow_get(ScrDyn *recv, const ScrStr *key) {
     scr_dyn_release(snapshot);
     return result;
   }
-  if (recv->kind == SCR_DYN_OBJ) return scr_dyn_obj_read(recv, key->data, key->len);
+  if (recv->kind == SCR_DYN_OBJ) return scr_dyn_obj_read(recv, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
   if (recv->kind == SCR_DYN_PROXY) return scr_dyn_proxy_get(recv, key);
 
   if (recv->kind == SCR_DYN_FUNC) {
-    ScrDyn *value = scr_dyn_fn_get(recv, key->data, key->len);
+    ScrDyn *value = scr_dyn_fn_get(recv, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
     return value ? value : scr_dyn_retain(scr_dyn_undefined());
   }
   if (recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_BYTES) {
-    if (key->len == 6 && memcmp(key->data, "length", 6) == 0) {
+    if (scr_str_flat_view(key)->len == 6 && memcmp(scr_str_flat_view(key)->data, "length", 6) == 0) {
       double length = recv->kind == SCR_DYN_ARR ? (double)recv->v.arr.len
         : recv->kind == SCR_DYN_STR ? scr_str_utf16_len(recv->v.str)
         : (double)recv->v.bytes->len;
@@ -294,7 +294,7 @@ static bool dyn_borrow_has(ScrDyn *recv, const ScrStr *key) {
         : index < recv->v.bytes->len);
   }
   if (recv->kind == SCR_DYN_FUNC) {
-    ScrDyn *value = scr_dyn_fn_get(recv, key->data, key->len);
+    ScrDyn *value = scr_dyn_fn_get(recv, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
     bool present = value != NULL;
     scr_dyn_release(value);
     return present;
@@ -1194,7 +1194,7 @@ static ScrDyn *scr_dyn_invoke_impl(
         ? scr_dyn_string_coerce_js(args[0]) : scr_str_new(",", 1);
       if (!separator) { free(b.data); return NULL; }
       for (size_t i = 0; i < len; i++) {
-        if (i > 0) scr_jb_write(&b, separator->data, separator->len);
+        if (i > 0) scr_jb_write(&b, scr_str_flat_view(separator)->data, scr_str_flat_view(separator)->len);
         ScrDyn *e = scr_dyn_arr_at(recv, (double)i);
         if (e) {
           if (e->kind != SCR_DYN_UNDEF && e->kind != SCR_DYN_NULL) scr_dyn_display_buf(&b, e);
@@ -1631,7 +1631,7 @@ static ScrDyn *dyn_array_method_value_call(ScrClosure *closure, ScrDyn *const *a
   ScrDyn *receiver = scr_dyn_this_get();
   ScrDyn *result;
   if (receiver->kind == SCR_DYN_ARR) {
-    result = scr_dyn_invoke(receiver, method->data, args, argc, method->data);
+    result = scr_dyn_invoke(receiver, scr_str_flat_view(method)->data, args, argc, scr_str_flat_view(method)->data);
   } else {
     ScrDyn *pack = scr_dyn_new_arr();
     for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(pack, scr_dyn_retain(args[i]));
@@ -1655,15 +1655,15 @@ static ScrDyn *dyn_builtin_method_call(ScrClosure *closure, ScrDyn *const *args,
   ScrStr *method = scr_box_get_ref(closure->caps[1]);
   ScrDyn *receiver = scr_dyn_this_get();
   ScrDyn *result = NULL;
-  if (!strcmp(prototype->data, "Object")) {
+  if (!strcmp(scr_str_flat_view(prototype)->data, "Object")) {
     ScrDyn *key = argc ? args[0] : scr_dyn_undefined();
-    if (!strcmp(method->data, "toString")) {
+    if (!strcmp(scr_str_flat_view(method)->data, "toString")) {
       ScrStr *tag = scr_dyn_object_tag(receiver);
       if (tag) { result = scr_dyn_new_str(tag); scr_str_release(tag); }
-    } else if (!strcmp(method->data, "hasOwnProperty")) {
+    } else if (!strcmp(scr_str_flat_view(method)->data, "hasOwnProperty")) {
       bool own = scr_dyn_has_own_computed(receiver, key);
       if (!scr_exc_pending()) result = scr_dyn_new_bool(own);
-    } else if (!strcmp(method->data, "propertyIsEnumerable")) {
+    } else if (!strcmp(scr_str_flat_view(method)->data, "propertyIsEnumerable")) {
       bool enumerable = scr_dyn_property_is_enumerable_computed(receiver, key);
       if (!scr_exc_pending()) result = scr_dyn_new_bool(enumerable);
     } else if (receiver->kind == SCR_DYN_NULL || receiver->kind == SCR_DYN_UNDEF) {
@@ -1672,23 +1672,23 @@ static ScrDyn *dyn_builtin_method_call(ScrClosure *closure, ScrDyn *const *args,
     } else if (receiver->kind == SCR_DYN_OBJ || receiver->kind == SCR_DYN_ARR ||
         receiver->kind == SCR_DYN_FUNC || receiver->kind == SCR_DYN_HANDLE ||
         receiver->kind == SCR_DYN_TYPED_REF || receiver->kind == SCR_DYN_PROXY) result = scr_dyn_retain(receiver);
-    else dyn_throw_unsupported("Object", method->data);
+    else dyn_throw_unsupported("Object", scr_str_flat_view(method)->data);
   } else {
     bool compatible = false;
-    if (!strcmp(prototype->data, "String")) compatible = receiver->kind != SCR_DYN_UNDEF && receiver->kind != SCR_DYN_NULL;
-    else if (!strcmp(prototype->data, "Number")) compatible = receiver->kind == SCR_DYN_NUM;
+    if (!strcmp(scr_str_flat_view(prototype)->data, "String")) compatible = receiver->kind != SCR_DYN_UNDEF && receiver->kind != SCR_DYN_NULL;
+    else if (!strcmp(scr_str_flat_view(prototype)->data, "Number")) compatible = receiver->kind == SCR_DYN_NUM;
     else if (receiver->kind == SCR_DYN_HANDLE) {
       const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(receiver);
-      compatible = !strcmp(ops->cls, prototype->data);
+      compatible = !strcmp(ops->cls, scr_str_flat_view(prototype)->data);
     }
     if (!compatible) {
       static const char message[] = "Builtin prototype method called on incompatible receiver";
       scr_throw_error_msg(SCR_ERR_TYPE, message, sizeof message - 1);
-    } else if (!strcmp(method->data, "toString") && receiver->kind == SCR_DYN_NUM) {
+    } else if (!strcmp(scr_str_flat_view(method)->data, "toString") && receiver->kind == SCR_DYN_NUM) {
       ScrStr *value = scr_dyn_to_string_argument(receiver, argc ? args[0] : scr_dyn_undefined(), method);
       if (value) { result = scr_dyn_new_str(value); scr_str_release(value); }
-    } else if (!strcmp(prototype->data, "String")) {
-      bool strict = !strcmp(method->data, "toString") || !strcmp(method->data, "valueOf");
+    } else if (!strcmp(scr_str_flat_view(prototype)->data, "String")) {
+      bool strict = !strcmp(scr_str_flat_view(method)->data, "toString") || !strcmp(scr_str_flat_view(method)->data, "valueOf");
       if (strict && receiver->kind != SCR_DYN_STR) {
         static const char message[] = "String.prototype method requires a string receiver";
         scr_throw_error_msg(SCR_ERR_TYPE, message, sizeof message - 1);
@@ -1698,12 +1698,12 @@ static ScrDyn *dyn_builtin_method_call(ScrClosure *closure, ScrDyn *const *args,
         if (text) {
           ScrDyn *string = scr_dyn_new_str(text);
           scr_str_release(text);
-          if (!strcmp(method->data, "slice")) result = scr_dyn_invoke(string, method->data, args, argc, method->data);
-          else dyn_throw_unsupported("String", method->data);
+          if (!strcmp(scr_str_flat_view(method)->data, "slice")) result = scr_dyn_invoke(string, scr_str_flat_view(method)->data, args, argc, scr_str_flat_view(method)->data);
+          else dyn_throw_unsupported("String", scr_str_flat_view(method)->data);
           scr_dyn_release(string);
         }
       }
-    } else result = scr_dyn_invoke(receiver, method->data, args, argc, method->data);
+    } else result = scr_dyn_invoke(receiver, scr_str_flat_view(method)->data, args, argc, scr_str_flat_view(method)->data);
   }
   scr_dyn_release(receiver);
   scr_str_release(prototype);
@@ -1718,27 +1718,27 @@ ScrDyn *scr_dyn_builtin_method(const ScrStr *prototype, const ScrStr *method) {
   }
   ScrJsonBuf buffer;
   scr_jb_init(&buffer);
-  scr_jb_puts(&buffer, prototype->data);
+  scr_jb_puts(&buffer, scr_str_flat_view(prototype)->data);
   scr_jb_putc(&buffer, '.');
-  scr_jb_puts(&buffer, method->data);
+  scr_jb_puts(&buffer, scr_str_flat_view(method)->data);
   ScrStr *key = scr_jb_finish(&buffer);
-  ScrDyn *value = scr_dyn_obj_get(dyn_builtin_methods, key->data, key->len);
+  ScrDyn *value = scr_dyn_obj_get(dyn_builtin_methods, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
   if (!value) {
     ScrClosure *closure = scr_closure_new(NULL, 2);
     closure->caps[0] = scr_box_new(SCR_BOX_STR);
     closure->caps[1] = scr_box_new(SCR_BOX_STR);
     scr_box_set_ref(closure->caps[0], scr_str_retain((ScrStr *)prototype));
     scr_box_set_ref(closure->caps[1], scr_str_retain((ScrStr *)method));
-    size_t arity = (!strcmp(method->data, "set") || !strcmp(method->data, "substring") ||
-      !strcmp(method->data, "slice") ||
-      !strcmp(method->data, "replace") || !strcmp(method->data, "split")) ? 2 :
-      (!strcmp(method->data, "get") || !strcmp(method->data, "add") || !strcmp(method->data, "has") ||
-       !strcmp(method->data, "delete") || !strcmp(method->data, "forEach") || !strcmp(method->data, "startsWith") ||
-       !strcmp(method->data, "endsWith") || !strcmp(method->data, "padStart") || !strcmp(method->data, "toJSON") ||
-       !strcmp(method->data, "charCodeAt") || !strcmp(method->data, "hasOwnProperty") ||
-       !strcmp(method->data, "propertyIsEnumerable") || (!strcmp(prototype->data, "Number") && !strcmp(method->data, "toString"))) ? 1 : 0;
-    value = scr_dyn_new_func(closure, dyn_builtin_method_call, arity, "native:prototype", method->data);
-    scr_dyn_obj_set(dyn_builtin_methods, key->data, key->len, value);
+    size_t arity = (!strcmp(scr_str_flat_view(method)->data, "set") || !strcmp(scr_str_flat_view(method)->data, "substring") ||
+      !strcmp(scr_str_flat_view(method)->data, "slice") ||
+      !strcmp(scr_str_flat_view(method)->data, "replace") || !strcmp(scr_str_flat_view(method)->data, "split")) ? 2 :
+      (!strcmp(scr_str_flat_view(method)->data, "get") || !strcmp(scr_str_flat_view(method)->data, "add") || !strcmp(scr_str_flat_view(method)->data, "has") ||
+       !strcmp(scr_str_flat_view(method)->data, "delete") || !strcmp(scr_str_flat_view(method)->data, "forEach") || !strcmp(scr_str_flat_view(method)->data, "startsWith") ||
+       !strcmp(scr_str_flat_view(method)->data, "endsWith") || !strcmp(scr_str_flat_view(method)->data, "padStart") || !strcmp(scr_str_flat_view(method)->data, "toJSON") ||
+       !strcmp(scr_str_flat_view(method)->data, "charCodeAt") || !strcmp(scr_str_flat_view(method)->data, "hasOwnProperty") ||
+       !strcmp(scr_str_flat_view(method)->data, "propertyIsEnumerable") || (!strcmp(scr_str_flat_view(prototype)->data, "Number") && !strcmp(scr_str_flat_view(method)->data, "toString"))) ? 1 : 0;
+    value = scr_dyn_new_func(closure, dyn_builtin_method_call, arity, "native:prototype", scr_str_flat_view(method)->data);
+    scr_dyn_obj_set(dyn_builtin_methods, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, value);
   }
   scr_str_release(key);
   return scr_dyn_retain(value);
@@ -1808,8 +1808,8 @@ static ScrDyn *scr_dyn_define_props_internal(ScrDyn *target, ScrDyn *descs, ScrD
   for (size_t i = 0; i < keys->v.arr.len; i++) {
     ScrDyn *key = keys->v.arr.items[i];
     ScrStr *name = key->v.str;
-    if (!scr_dyn_obj_enumerable(descs, name->data, name->len)) continue;
-    ScrDyn *descriptor = scr_dyn_obj_read(descs, name->data, name->len);
+    if (!scr_dyn_obj_enumerable(descs, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len)) continue;
+    ScrDyn *descriptor = scr_dyn_obj_read(descs, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
     if (!descriptor) goto fail;
     if (descriptor->kind != SCR_DYN_OBJ) {
       ScrJsonBuf b;

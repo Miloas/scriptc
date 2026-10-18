@@ -168,14 +168,20 @@ void scr_pub_refuse_at(ScrPub *ctx, const char *message, const char *detail) {
  * thread may write an immortal header (the map code skips them). */
 #define SCR_PUB_HASH_PRIME_MAX 256
 
+static void scr_pub_str_owner(ScrStr *owner, void *ctx) {
+  scr_pub_str_fn(owner, ctx);
+}
+
 void scr_pub_str_fn(void *v, ScrPub *ctx) {
   ScrStr *s = v;
   if (s->rc == SIZE_MAX) return;
-  if (s->len <= SCR_PUB_HASH_PRIME_MAX) scr_str_hash_prime(s);
+  scr_str_prepare_publish(s);
+  if (scr_str_flat_view(s)->len <= SCR_PUB_HASH_PRIME_MAX) scr_str_hash_prime(s);
   /* Record proven ASCII now: an immortal string cannot record it later,
    * and every UTF-16 index mapper answers ASCII strings by identity. */
-  if (!s->ascii && scr_bytes_all_ascii(s->data, s->len)) s->ascii = 1;
-  scr_pub_mark(ctx, s, false, SCR_PUB_KIND_STRING);
+  if (scr_str_flat_view(s) == s && !s->ascii && scr_bytes_all_ascii(s->data, s->len)) s->ascii = 1;
+  if (scr_pub_mark(ctx, s, false, SCR_PUB_KIND_STRING))
+    scr_str_visit_owners(s, scr_pub_str_owner, ctx);
 }
 
 /* Objects without references (bigints): only the count. */

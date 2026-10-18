@@ -322,11 +322,11 @@ static void sf_throw_url_parse_failure(const ScrStr *input) {
   /* Sized without the NUL so it stays out of the unit's shared mergeable
    * string section (which every program linking this unit carries). */
   static const char prefix[25] = "Failed to parse URL from ";
-  size_t message_len = sizeof prefix + input->len;
+  size_t message_len = sizeof prefix + scr_str_flat_view(input)->len;
   char *message = malloc(message_len);
   if (!message) sf_oom();
   memcpy(message, prefix, sizeof prefix);
-  memcpy(message + sizeof prefix, input->data, input->len);
+  memcpy(message + sizeof prefix, scr_str_flat_view(input)->data, scr_str_flat_view(input)->len);
   ScrStr *text = scr_str_new(message, message_len);
   free(message);
   ScrError *e = scr_error_new(SCR_ERR_TYPE, text);
@@ -936,9 +936,9 @@ static ScrBytes *sf_chunk_bytes(const ScrDyn *chunk) {
     return scr_bytes_copy(chunk->v.bytes);
   }
   if (chunk && chunk->kind == SCR_DYN_STR) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)chunk->v.str->len);
-    memcpy(b->data, chunk->v.str->data, chunk->v.str->len);
-    if (!chunk->v.str->ascii) scr_wtf8_to_utf8((char *)b->data, chunk->v.str->len);
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(chunk->v.str)->len);
+    memcpy(b->data, scr_str_flat_view(chunk->v.str)->data, scr_str_flat_view(chunk->v.str)->len);
+    if (!chunk->v.str->ascii) scr_wtf8_to_utf8((char *)b->data, scr_str_flat_view(chunk->v.str)->len);
     return b;
   }
   sf_type_error("ReadableStream chunks must be Uint8Array or string values");
@@ -2128,15 +2128,15 @@ static ScrStr *sf_header_name_lower(const char *data, size_t len) {
  * handle (and before string methods assume the storage invariant). */
 static ScrStr *sf_latin1_to_utf8(const ScrStr *raw) {
   size_t extra = 0;
-  for (size_t i = 0; i < raw->len; i++) {
-    if ((unsigned char)raw->data[i] >= 0x80) extra++;
+  for (size_t i = 0; i < scr_str_flat_view(raw)->len; i++) {
+    if ((unsigned char)scr_str_flat_view(raw)->data[i] >= 0x80) extra++;
   }
   if (extra == 0) return scr_str_retain((ScrStr *)raw);
-  char *utf8 = malloc(raw->len + extra);
+  char *utf8 = malloc(scr_str_flat_view(raw)->len + extra);
   if (!utf8) sf_oom();
   size_t at = 0;
-  for (size_t i = 0; i < raw->len; i++) {
-    unsigned char byte = (unsigned char)raw->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(raw)->len; i++) {
+    unsigned char byte = (unsigned char)scr_str_flat_view(raw)->data[i];
     if (byte < 0x80) {
       utf8[at++] = (char)byte;
     } else {
@@ -2156,8 +2156,8 @@ static ScrStr *sf_latin1_to_utf8(const ScrStr *raw) {
  * each invalid octet and can follow a different resource.
  */
 static ScrStr *sf_location_to_utf8(const ScrStr *raw) {
-  ScrBytes *bytes = scr_bytes_new(SCR_BYTES_U8, (double)raw->len);
-  if (raw->len > 0) memcpy(bytes->data, raw->data, raw->len);
+  ScrBytes *bytes = scr_bytes_new(SCR_BYTES_U8, (double)scr_str_flat_view(raw)->len);
+  if (scr_str_flat_view(raw)->len > 0) memcpy(bytes->data, scr_str_flat_view(raw)->data, scr_str_flat_view(raw)->len);
   ScrStr *encoding = scr_str_new("utf8", 4);
   ScrStr *out = scr_bytes_to_str(bytes, encoding);
   scr_str_release(encoding);
@@ -2180,7 +2180,7 @@ static SfHeaders *sf_headers_new_response(ScrArr *raw_pairs) {
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *raw_name = scr_arr_get_ref(raw_pairs, (double)i);
     scr_arr_push_ref(
-        pairs, sf_header_name_lower(raw_name->data, raw_name->len));
+        pairs, sf_header_name_lower(scr_str_flat_view(raw_name)->data, scr_str_flat_view(raw_name)->len));
     scr_str_release(raw_name);
     ScrStr *raw = scr_arr_get_ref(raw_pairs, (double)(i + 1));
     scr_arr_push_ref(pairs, sf_latin1_to_utf8(raw));
@@ -2215,14 +2215,14 @@ static ScrStr *sf_trim_header_value(const ScrStr *value);
 
 static void sf_headers_invalid(
     const char *method, const ScrStr *value, const char *kind) {
-  size_t cap = strlen(method) + value->len + strlen(kind) + 48;
+  size_t cap = strlen(method) + scr_str_flat_view(value)->len + strlen(kind) + 48;
   char *message = malloc(cap);
   if (!message) sf_oom();
   int head = snprintf(message, cap, "Headers.%s: \"", method);
   if (head < 0 || (size_t)head >= cap) sf_oom();
   size_t at = (size_t)head;
-  memcpy(message + at, value->data, value->len);
-  at += value->len;
+  memcpy(message + at, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
+  at += scr_str_flat_view(value)->len;
   int tail = snprintf(
       message + at, cap - at,
       "\" is an invalid header %s.", kind);
@@ -2235,19 +2235,19 @@ static ScrStr *sf_headers_name(const ScrDyn *value, const char *method) {
   ScrStr *raw =
       scr_dyn_string_coerce_js(value ? value : scr_dyn_undefined());
   if (!raw) return NULL;
-  if (!sf_header_name_ok(raw->data, raw->len)) {
+  if (!sf_header_name_ok(scr_str_flat_view(raw)->data, scr_str_flat_view(raw)->len)) {
     sf_headers_invalid(method, raw, "name");
     scr_str_release(raw);
     return NULL;
   }
-  ScrStr *out = sf_header_name_lower(raw->data, raw->len);
+  ScrStr *out = sf_header_name_lower(scr_str_flat_view(raw)->data, scr_str_flat_view(raw)->len);
   scr_str_release(raw);
   return out;
 }
 
 static bool sf_headers_key_eq(const ScrStr *left, const ScrStr *right) {
-  return left->len == right->len &&
-         memcmp(left->data, right->data, left->len) == 0;
+  return scr_str_flat_view(left)->len == scr_str_flat_view(right)->len &&
+         memcmp(scr_str_flat_view(left)->data, scr_str_flat_view(right)->data, scr_str_flat_view(left)->len) == 0;
 }
 
 static ScrStr *sf_headers_get_value(SfHeaders *h, const ScrStr *name) {
@@ -2259,7 +2259,7 @@ static ScrStr *sf_headers_get_value(SfHeaders *h, const ScrStr *name) {
     ScrStr *value = scr_arr_get_ref(h->pairs, (double)(i + 1));
     if (sf_headers_key_eq(key, name)) {
       if (count > 0) total += 2;
-      total += value->len;
+      total += scr_str_flat_view(value)->len;
       count++;
     }
     scr_str_release(key);
@@ -2279,8 +2279,8 @@ static ScrStr *sf_headers_get_value(SfHeaders *h, const ScrStr *name) {
         joined[at++] = ',';
         joined[at++] = ' ';
       }
-      memcpy(joined + at, value->data, value->len);
-      at += value->len;
+      memcpy(joined + at, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
+      at += scr_str_flat_view(value)->len;
       emitted++;
     }
     scr_str_release(key);
@@ -2345,7 +2345,7 @@ static bool sf_headers_convert_pair(
  * Fetch-specific semicolon separator for Cookie. */
 static void sf_headers_append_pair(
     SfHeaders *h, ScrStr *name, ScrStr *value) {
-  if (!(name->len == 10 && memcmp(name->data, "set-cookie", 10) == 0)) {
+  if (!(scr_str_flat_view(name)->len == 10 && memcmp(scr_str_flat_view(name)->data, "set-cookie", 10) == 0)) {
     size_t n = (size_t)scr_arr_len(h->pairs);
     for (size_t i = 0; i + 1 < n; i += 2) {
       ScrStr *key = scr_arr_get_ref(h->pairs, (double)i);
@@ -2355,15 +2355,15 @@ static void sf_headers_append_pair(
 
       ScrStr *previous = scr_arr_get_ref(h->pairs, (double)(i + 1));
       const char *separator =
-          name->len == 6 && memcmp(name->data, "cookie", 6) == 0
+          scr_str_flat_view(name)->len == 6 && memcmp(scr_str_flat_view(name)->data, "cookie", 6) == 0
               ? "; "
               : ", ";
-      size_t joined_len = previous->len + 2 + value->len;
+      size_t joined_len = scr_str_flat_view(previous)->len + 2 + scr_str_flat_view(value)->len;
       char *joined_data = malloc(joined_len ? joined_len : 1);
       if (!joined_data) sf_oom();
-      memcpy(joined_data, previous->data, previous->len);
-      memcpy(joined_data + previous->len, separator, 2);
-      memcpy(joined_data + previous->len + 2, value->data, value->len);
+      memcpy(joined_data, scr_str_flat_view(previous)->data, scr_str_flat_view(previous)->len);
+      memcpy(joined_data + scr_str_flat_view(previous)->len, separator, 2);
+      memcpy(joined_data + scr_str_flat_view(previous)->len + 2, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
       ScrStr *joined = scr_str_new(joined_data, joined_len);
       free(joined_data);
       scr_str_release(previous);
@@ -2380,10 +2380,10 @@ static void sf_headers_append_pair(
 static int sf_headers_name_cmp(const void *left, const void *right) {
   const ScrStr *a = *(ScrStr *const *)left;
   const ScrStr *b = *(ScrStr *const *)right;
-  size_t shared = a->len < b->len ? a->len : b->len;
-  int cmp = memcmp(a->data, b->data, shared);
+  size_t shared = scr_str_flat_view(a)->len < scr_str_flat_view(b)->len ? scr_str_flat_view(a)->len : scr_str_flat_view(b)->len;
+  int cmp = memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, shared);
   if (cmp != 0) return cmp;
-  return a->len < b->len ? -1 : a->len > b->len ? 1 : 0;
+  return scr_str_flat_view(a)->len < scr_str_flat_view(b)->len ? -1 : scr_str_flat_view(a)->len > scr_str_flat_view(b)->len ? 1 : 0;
 }
 
 static ScrStr **sf_headers_sorted_names(SfHeaders *h, size_t *count_out) {
@@ -2412,7 +2412,7 @@ static ScrStr **sf_headers_sorted_names(SfHeaders *h, size_t *count_out) {
 }
 
 static bool sf_headers_is_set_cookie(const ScrStr *name) {
-  return name->len == 10 && memcmp(name->data, "set-cookie", 10) == 0;
+  return scr_str_flat_view(name)->len == 10 && memcmp(scr_str_flat_view(name)->data, "set-cookie", 10) == 0;
 }
 
 /* The `index`th entry of Fetch's "sort and combine" list: names in
@@ -2485,8 +2485,8 @@ static ScrDyn *sf_headers_invoke(void *ptr, ScrDyn *self,
     for (size_t i = 0; i + 1 < n; i += 2) {
       ScrStr *key = scr_arr_get_ref(h->pairs, (double)i);
       ScrStr *value = scr_arr_get_ref(h->pairs, (double)(i + 1));
-      if (key->len == 10 &&
-          memcmp(key->data, "set-cookie", 10) == 0) {
+      if (scr_str_flat_view(key)->len == 10 &&
+          memcmp(scr_str_flat_view(key)->data, "set-cookie", 10) == 0) {
         scr_dyn_arr_push(out, scr_dyn_new_str(value));
       }
       scr_str_release(key);
@@ -2830,9 +2830,9 @@ static void sf_transfer_stream_error(SfTransfer *t, ScrDyn *reason) {
 
 static bool sf_eq_ci(const ScrStr *s, const char *lit) {
   size_t n = strlen(lit);
-  if (s->len != n) return false;
+  if (scr_str_flat_view(s)->len != n) return false;
   for (size_t i = 0; i < n; i++) {
-    char c = s->data[i];
+    char c = scr_str_flat_view(s)->data[i];
     if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
     if (c != lit[i]) return false;
   }
@@ -2840,18 +2840,18 @@ static bool sf_eq_ci(const ScrStr *s, const char *lit) {
 }
 
 static ScrStr *sf_bare_host(const ScrStr *host) {
-  if (host->len >= 2 && host->data[0] == '[' &&
-      host->data[host->len - 1] == ']') {
-    return scr_str_new(host->data + 1, host->len - 2);
+  if (scr_str_flat_view(host)->len >= 2 && scr_str_flat_view(host)->data[0] == '[' &&
+      scr_str_flat_view(host)->data[scr_str_flat_view(host)->len - 1] == ']') {
+    return scr_str_new(scr_str_flat_view(host)->data + 1, scr_str_flat_view(host)->len - 2);
   }
   return scr_str_retain((ScrStr *)host);
 }
 
 static int sf_port(const ScrUrl *u, int dflt) {
-  if (u->port->len == 0) return dflt;
+  if (scr_str_flat_view(u->port)->len == 0) return dflt;
   int p = 0;
-  for (size_t i = 0; i < u->port->len; i++) {
-    p = p * 10 + (u->port->data[i] - '0');
+  for (size_t i = 0; i < scr_str_flat_view(u->port)->len; i++) {
+    p = p * 10 + (scr_str_flat_view(u->port)->data[i] - '0');
   }
   return p;
 }
@@ -2865,56 +2865,56 @@ static bool sf_bad_port(int port) {
 }
 
 static ScrStr *sf_path(const ScrUrl *u) {
-  size_t plen = (u->path->len > 0 ? u->path->len : 1) + u->query->len;
+  size_t plen = (scr_str_flat_view(u->path)->len > 0 ? scr_str_flat_view(u->path)->len : 1) + scr_str_flat_view(u->query)->len;
   char *buf = malloc(plen);
   if (!buf) sf_oom();
   size_t n = 0;
-  if (u->path->len > 0) {
-    memcpy(buf, u->path->data, u->path->len);
-    n = u->path->len;
+  if (scr_str_flat_view(u->path)->len > 0) {
+    memcpy(buf, scr_str_flat_view(u->path)->data, scr_str_flat_view(u->path)->len);
+    n = scr_str_flat_view(u->path)->len;
   } else {
     buf[n++] = '/';
   }
-  memcpy(buf + n, u->query->data, u->query->len);
-  n += u->query->len;
+  memcpy(buf + n, scr_str_flat_view(u->query)->data, scr_str_flat_view(u->query)->len);
+  n += scr_str_flat_view(u->query)->len;
   ScrStr *out = scr_str_new(buf, n);
   free(buf);
   return out;
 }
 
 static ScrStr *sf_url_serialize(const ScrUrl *u) {
-  size_t cap = u->scheme->len + u->userinfo->len + u->host->len +
-               u->port->len + u->path->len + u->query->len + 8;
+  size_t cap = scr_str_flat_view(u->scheme)->len + scr_str_flat_view(u->userinfo)->len + scr_str_flat_view(u->host)->len +
+               scr_str_flat_view(u->port)->len + scr_str_flat_view(u->path)->len + scr_str_flat_view(u->query)->len + 8;
   char *buf = malloc(cap);
   if (!buf) sf_oom();
   size_t n = 0;
-  memcpy(buf + n, u->scheme->data, u->scheme->len);
-  n += u->scheme->len;
+  memcpy(buf + n, scr_str_flat_view(u->scheme)->data, scr_str_flat_view(u->scheme)->len);
+  n += scr_str_flat_view(u->scheme)->len;
   buf[n++] = ':';
   if (u->has_authority) {
     buf[n++] = '/';
     buf[n++] = '/';
-    if (u->userinfo->len > 0) {
-      memcpy(buf + n, u->userinfo->data, u->userinfo->len);
-      n += u->userinfo->len;
+    if (scr_str_flat_view(u->userinfo)->len > 0) {
+      memcpy(buf + n, scr_str_flat_view(u->userinfo)->data, scr_str_flat_view(u->userinfo)->len);
+      n += scr_str_flat_view(u->userinfo)->len;
       buf[n++] = '@';
     }
-    memcpy(buf + n, u->host->data, u->host->len);
-    n += u->host->len;
-    if (u->port->len > 0) {
+    memcpy(buf + n, scr_str_flat_view(u->host)->data, scr_str_flat_view(u->host)->len);
+    n += scr_str_flat_view(u->host)->len;
+    if (scr_str_flat_view(u->port)->len > 0) {
       buf[n++] = ':';
-      memcpy(buf + n, u->port->data, u->port->len);
-      n += u->port->len;
+      memcpy(buf + n, scr_str_flat_view(u->port)->data, scr_str_flat_view(u->port)->len);
+      n += scr_str_flat_view(u->port)->len;
     }
   }
-  if (u->path->len > 0) {
-    memcpy(buf + n, u->path->data, u->path->len);
-    n += u->path->len;
+  if (scr_str_flat_view(u->path)->len > 0) {
+    memcpy(buf + n, scr_str_flat_view(u->path)->data, scr_str_flat_view(u->path)->len);
+    n += scr_str_flat_view(u->path)->len;
   } else {
     buf[n++] = '/';
   }
-  memcpy(buf + n, u->query->data, u->query->len);
-  n += u->query->len;
+  memcpy(buf + n, scr_str_flat_view(u->query)->data, scr_str_flat_view(u->query)->len);
+  n += scr_str_flat_view(u->query)->len;
   ScrStr *out = scr_str_new(buf, n);
   free(buf);
   return out;
@@ -2971,23 +2971,23 @@ static int sf_hex_value(char c) {
 /* EnvHttpProxyAgent sends Basic proxy authentication only when the proxy
  * URL has both a username and a password. */
 static bool sf_proxy_has_credentials(const ScrStr *userinfo) {
-  const char *colon = memchr(userinfo->data, ':', userinfo->len);
-  return colon != NULL && colon != userinfo->data &&
-         colon + 1 < userinfo->data + userinfo->len;
+  const char *colon = memchr(scr_str_flat_view(userinfo)->data, ':', scr_str_flat_view(userinfo)->len);
+  return colon != NULL && colon != scr_str_flat_view(userinfo)->data &&
+         colon + 1 < scr_str_flat_view(userinfo)->data + scr_str_flat_view(userinfo)->len;
 }
 
 /* EnvHttpProxyAgent derives Basic proxy authentication from the proxy URL's
  * decoded username/password. ScrUrl keeps the encoded userinfo as one string,
  * so decode it here. */
 static ScrStr *sf_proxy_authorization(const ScrStr *userinfo) {
-  char *plain = malloc(userinfo->len + 1);
+  char *plain = malloc(scr_str_flat_view(userinfo)->len + 1);
   if (!plain) sf_oom();
   size_t plain_len = 0;
-  for (size_t i = 0; i < userinfo->len;) {
-    char c = userinfo->data[i];
-    if (c == '%' && i + 2 < userinfo->len) {
-      int hi = sf_hex_value(userinfo->data[i + 1]);
-      int lo = sf_hex_value(userinfo->data[i + 2]);
+  for (size_t i = 0; i < scr_str_flat_view(userinfo)->len;) {
+    char c = scr_str_flat_view(userinfo)->data[i];
+    if (c == '%' && i + 2 < scr_str_flat_view(userinfo)->len) {
+      int hi = sf_hex_value(scr_str_flat_view(userinfo)->data[i + 1]);
+      int lo = sf_hex_value(scr_str_flat_view(userinfo)->data[i + 2]);
       if (hi >= 0 && lo >= 0) {
         plain[plain_len++] = (char)((hi << 4) | lo);
         i += 3;
@@ -3059,14 +3059,14 @@ static bool sf_no_proxy_match(const char *list, const ScrStr *host,
     if (host_len == 0 || (entry_port >= 0 && entry_port != port)) {
       continue;
     }
-    size_t offset = host->len >= host_len ? host->len - host_len : 0;
+    size_t offset = scr_str_flat_view(host)->len >= host_len ? scr_str_flat_view(host)->len - host_len : 0;
     bool boundary =
-        host->len == host_len ||
-        (host->len > host_len && host->data[offset - 1] == '.');
+        scr_str_flat_view(host)->len == host_len ||
+        (scr_str_flat_view(host)->len > host_len && scr_str_flat_view(host)->data[offset - 1] == '.');
     if (!boundary) continue;
     bool equal = true;
     for (size_t i = 0; i < host_len; i++) {
-      char a = host->data[offset + i];
+      char a = scr_str_flat_view(host)->data[offset + i];
       char b = start[i];
       if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
       if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
@@ -3100,35 +3100,35 @@ static ScrUrl *sf_proxy_for(const ScrUrl *target, bool https,
 
 static bool sf_same_scheme_relative(const ScrUrl *base,
                                     const ScrStr *location) {
-  if (location->len <= base->scheme->len ||
-      location->data[base->scheme->len] != ':') {
+  if (scr_str_flat_view(location)->len <= scr_str_flat_view(base->scheme)->len ||
+      scr_str_flat_view(location)->data[scr_str_flat_view(base->scheme)->len] != ':') {
     return false;
   }
-  for (size_t i = 0; i < base->scheme->len; i++) {
-    char a = location->data[i];
-    char b = base->scheme->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(base->scheme)->len; i++) {
+    char a = scr_str_flat_view(location)->data[i];
+    char b = scr_str_flat_view(base->scheme)->data[i];
     if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
     if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
     if (a != b) return false;
   }
-  size_t tail = base->scheme->len + 1;
-  return location->len - tail < 2 ||
-         !((location->data[tail] == '/' ||
-            location->data[tail] == '\\') &&
-           (location->data[tail + 1] == '/' ||
-            location->data[tail + 1] == '\\'));
+  size_t tail = scr_str_flat_view(base->scheme)->len + 1;
+  return scr_str_flat_view(location)->len - tail < 2 ||
+         !((scr_str_flat_view(location)->data[tail] == '/' ||
+            scr_str_flat_view(location)->data[tail] == '\\') &&
+           (scr_str_flat_view(location)->data[tail + 1] == '/' ||
+            scr_str_flat_view(location)->data[tail + 1] == '\\'));
 }
 
 static ScrUrl *sf_resolve_url(const ScrUrl *base, const ScrStr *location) {
   bool same_scheme_relative = sf_same_scheme_relative(base, location);
   const char *ref_data =
-      location->data +
-      (same_scheme_relative ? base->scheme->len + 1 : 0);
+      scr_str_flat_view(location)->data +
+      (same_scheme_relative ? scr_str_flat_view(base->scheme)->len + 1 : 0);
   size_t ref_len =
-      location->len -
-      (same_scheme_relative ? base->scheme->len + 1 : 0);
+      scr_str_flat_view(location)->len -
+      (same_scheme_relative ? scr_str_flat_view(base->scheme)->len + 1 : 0);
   if (!same_scheme_relative) {
-    ScrStr *absolute = scr_str_new(location->data, location->len);
+    ScrStr *absolute = scr_str_new(scr_str_flat_view(location)->data, scr_str_flat_view(location)->len);
     ScrUrl *parsed = sf_url_parse_quiet(absolute);
     scr_str_release(absolute);
     if (parsed) return parsed;
@@ -3142,11 +3142,11 @@ static ScrUrl *sf_resolve_url(const ScrUrl *base, const ScrStr *location) {
    */
   if (ref_len == 0 || ref_data[0] == '#') {
     ScrStr *base_text = sf_url_serialize(base);
-    size_t len = base_text->len + ref_len;
+    size_t len = scr_str_flat_view(base_text)->len + ref_len;
     char *joined = malloc(len);
     if (!joined) sf_oom();
-    memcpy(joined, base_text->data, base_text->len);
-    memcpy(joined + base_text->len, ref_data, ref_len);
+    memcpy(joined, scr_str_flat_view(base_text)->data, scr_str_flat_view(base_text)->len);
+    memcpy(joined + scr_str_flat_view(base_text)->len, ref_data, ref_len);
     ScrStr *text = scr_str_new(joined, len);
     free(joined);
     scr_str_release(base_text);
@@ -3155,14 +3155,14 @@ static ScrUrl *sf_resolve_url(const ScrUrl *base, const ScrStr *location) {
     return out;
   }
 
-  size_t cap = base->scheme->len + base->userinfo->len + base->host->len +
-               base->port->len + base->path->len + base->query->len +
+  size_t cap = scr_str_flat_view(base->scheme)->len + scr_str_flat_view(base->userinfo)->len + scr_str_flat_view(base->host)->len +
+               scr_str_flat_view(base->port)->len + scr_str_flat_view(base->path)->len + scr_str_flat_view(base->query)->len +
                ref_len + 16;
   char *buf = malloc(cap);
   if (!buf) sf_oom();
   size_t n = 0;
-  memcpy(buf + n, base->scheme->data, base->scheme->len);
-  n += base->scheme->len;
+  memcpy(buf + n, scr_str_flat_view(base->scheme)->data, scr_str_flat_view(base->scheme)->len);
+  n += scr_str_flat_view(base->scheme)->len;
   buf[n++] = ':';
   if (ref_len >= 2 &&
       (ref_data[0] == '/' || ref_data[0] == '\\') &&
@@ -3172,33 +3172,33 @@ static ScrUrl *sf_resolve_url(const ScrUrl *base, const ScrStr *location) {
   } else {
     buf[n++] = '/';
     buf[n++] = '/';
-    if (base->userinfo->len > 0) {
-      memcpy(buf + n, base->userinfo->data, base->userinfo->len);
-      n += base->userinfo->len;
+    if (scr_str_flat_view(base->userinfo)->len > 0) {
+      memcpy(buf + n, scr_str_flat_view(base->userinfo)->data, scr_str_flat_view(base->userinfo)->len);
+      n += scr_str_flat_view(base->userinfo)->len;
       buf[n++] = '@';
     }
-    memcpy(buf + n, base->host->data, base->host->len);
-    n += base->host->len;
-    if (base->port->len > 0) {
+    memcpy(buf + n, scr_str_flat_view(base->host)->data, scr_str_flat_view(base->host)->len);
+    n += scr_str_flat_view(base->host)->len;
+    if (scr_str_flat_view(base->port)->len > 0) {
       buf[n++] = ':';
-      memcpy(buf + n, base->port->data, base->port->len);
-      n += base->port->len;
+      memcpy(buf + n, scr_str_flat_view(base->port)->data, scr_str_flat_view(base->port)->len);
+      n += scr_str_flat_view(base->port)->len;
     }
     if (ref_len > 0 &&
         (ref_data[0] == '/' || ref_data[0] == '\\')) {
       memcpy(buf + n, ref_data, ref_len);
       n += ref_len;
     } else if (ref_len > 0 && ref_data[0] == '?') {
-      memcpy(buf + n, base->path->data, base->path->len);
-      n += base->path->len;
+      memcpy(buf + n, scr_str_flat_view(base->path)->data, scr_str_flat_view(base->path)->len);
+      n += scr_str_flat_view(base->path)->len;
       memcpy(buf + n, ref_data, ref_len);
       n += ref_len;
     } else {
       size_t keep = 0;
-      for (size_t i = 0; i < base->path->len; i++) {
-        if (base->path->data[i] == '/') keep = i + 1;
+      for (size_t i = 0; i < scr_str_flat_view(base->path)->len; i++) {
+        if (scr_str_flat_view(base->path)->data[i] == '/') keep = i + 1;
       }
-      memcpy(buf + n, base->path->data, keep);
+      memcpy(buf + n, scr_str_flat_view(base->path)->data, keep);
       n += keep;
       if (keep == 0) buf[n++] = '/';
       memcpy(buf + n, ref_data, ref_len);
@@ -3217,9 +3217,9 @@ static bool sf_pairs_have(ScrArr *pairs, const char *name) {
   size_t want = strlen(name);
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *key = (ScrStr *)scr_arr_get_ref(pairs, (double)i);
-    bool same = key->len == want;
+    bool same = scr_str_flat_view(key)->len == want;
     for (size_t j = 0; j < want && same; j++) {
-      char c = key->data[j];
+      char c = scr_str_flat_view(key)->data[j];
       if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
       same = c == name[j];
     }
@@ -3243,8 +3243,8 @@ static bool sf_header_name_ok(const char *s, size_t len) {
 }
 
 static bool sf_header_value_ok(const ScrStr *value) {
-  for (size_t i = 0; i < value->len; i++) {
-    unsigned char c = (unsigned char)value->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(value)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(value)->data[i];
     if ((c < 0x20 && c != '\t') || c == 0x7f) return false;
   }
   return true;
@@ -3294,13 +3294,13 @@ static bool sf_header_name_ci(
 static bool sf_connection_tokens(const ScrStr *value, bool *close) {
   *close = false;
   size_t start = 0;
-  for (size_t i = 0; i <= value->len; i++) {
-    if (i < value->len && value->data[i] != ',') continue;
+  for (size_t i = 0; i <= scr_str_flat_view(value)->len; i++) {
+    if (i < scr_str_flat_view(value)->len && scr_str_flat_view(value)->data[i] != ',') continue;
     size_t a = start, b = i;
-    while (a < b && (value->data[a] == ' ' || value->data[a] == '\t')) a++;
-    while (b > a && (value->data[b - 1] == ' ' || value->data[b - 1] == '\t')) b--;
-    if (!sf_header_name_ok(value->data + a, b - a)) return false;
-    if (sf_header_name_ci(value->data + a, b - a, "close")) *close = true;
+    while (a < b && (scr_str_flat_view(value)->data[a] == ' ' || scr_str_flat_view(value)->data[a] == '\t')) a++;
+    while (b > a && (scr_str_flat_view(value)->data[b - 1] == ' ' || scr_str_flat_view(value)->data[b - 1] == '\t')) b--;
+    if (!sf_header_name_ok(scr_str_flat_view(value)->data + a, b - a)) return false;
+    if (sf_header_name_ci(scr_str_flat_view(value)->data + a, b - a, "close")) *close = true;
     start = i + 1;
   }
   return true;
@@ -3321,16 +3321,16 @@ static bool sf_request_header_ok(
 
 static ScrStr *sf_trim_header_value(const ScrStr *value) {
   size_t start = 0;
-  size_t end = value->len;
+  size_t end = scr_str_flat_view(value)->len;
   while (start < end &&
-         (value->data[start] == ' ' || value->data[start] == '\t')) {
+         (scr_str_flat_view(value)->data[start] == ' ' || scr_str_flat_view(value)->data[start] == '\t')) {
     start++;
   }
   while (end > start &&
-         (value->data[end - 1] == ' ' || value->data[end - 1] == '\t')) {
+         (scr_str_flat_view(value)->data[end - 1] == ' ' || scr_str_flat_view(value)->data[end - 1] == '\t')) {
     end--;
   }
-  return scr_str_new(value->data + start, end - start);
+  return scr_str_new(scr_str_flat_view(value)->data + start, end - start);
 }
 
 static bool sf_push_header(ScrArr *pairs, const char *name, size_t name_len,
@@ -3361,9 +3361,9 @@ static bool sf_push_header(ScrArr *pairs, const char *name, size_t name_len,
     size_t n = (size_t)scr_arr_len(pairs);
     for (size_t i = 0; i + 1 < n; i += 2) {
       ScrStr *key = scr_arr_get_ref(pairs, (double)i);
-      bool match = key->len == name_len;
+      bool match = scr_str_flat_view(key)->len == name_len;
       for (size_t j = 0; j < name_len && match; j++) {
-        unsigned char a = (unsigned char)key->data[j];
+        unsigned char a = (unsigned char)scr_str_flat_view(key)->data[j];
         unsigned char b = (unsigned char)name[j];
         if (a >= 'A' && a <= 'Z') a = (unsigned char)(a - 'A' + 'a');
         if (b >= 'A' && b <= 'Z') b = (unsigned char)(b - 'A' + 'a');
@@ -3378,13 +3378,13 @@ static bool sf_push_header(ScrArr *pairs, const char *name, size_t name_len,
           sf_header_name_ci(name, name_len, "cookie") ? "; " : ", ";
       size_t separator_len = 2;
       size_t joined_len =
-          previous->len + separator_len + normalized->len;
+          scr_str_flat_view(previous)->len + separator_len + scr_str_flat_view(normalized)->len;
       char *joined_data = malloc(joined_len ? joined_len : 1);
       if (!joined_data) sf_oom();
-      memcpy(joined_data, previous->data, previous->len);
-      memcpy(joined_data + previous->len, separator, separator_len);
-      memcpy(joined_data + previous->len + separator_len,
-             normalized->data, normalized->len);
+      memcpy(joined_data, scr_str_flat_view(previous)->data, scr_str_flat_view(previous)->len);
+      memcpy(joined_data + scr_str_flat_view(previous)->len, separator, separator_len);
+      memcpy(joined_data + scr_str_flat_view(previous)->len + separator_len,
+             scr_str_flat_view(normalized)->data, scr_str_flat_view(normalized)->len);
       ScrStr *joined = scr_str_new(joined_data, joined_len);
       free(joined_data);
       scr_str_release(previous);
@@ -3555,7 +3555,7 @@ static bool sf_add_converted_headers(
     ScrStr *name = scr_arr_get_ref(converted, (double)i);
     ScrStr *value = scr_arr_get_ref(converted, (double)(i + 1));
     bool ok = sf_push_header(
-        pairs, name->data, name->len, value, request_guard);
+        pairs, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, value, request_guard);
     scr_str_release(name);
     scr_str_release(value);
     if (!ok) return false;
@@ -3615,20 +3615,20 @@ static bool sf_content_length(ScrArr *headers, bool *present_out,
       return false;
     }
     size_t start = 0;
-    size_t end = value->len;
+    size_t end = scr_str_flat_view(value)->len;
     while (start < end &&
-           (value->data[start] == ' ' || value->data[start] == '\t')) {
+           (scr_str_flat_view(value)->data[start] == ' ' || scr_str_flat_view(value)->data[start] == '\t')) {
       start++;
     }
     while (end > start &&
-           (value->data[end - 1] == ' ' ||
-            value->data[end - 1] == '\t')) {
+           (scr_str_flat_view(value)->data[end - 1] == ' ' ||
+            scr_str_flat_view(value)->data[end - 1] == '\t')) {
       end--;
     }
     bool valid = start < end;
     size_t parsed = 0;
     for (size_t j = start; j < end && valid; j++) {
-      unsigned char c = (unsigned char)value->data[j];
+      unsigned char c = (unsigned char)scr_str_flat_view(value)->data[j];
       if (c < '0' || c > '9') {
         valid = false;
         break;
@@ -3674,10 +3674,10 @@ static bool sf_method_validate(ScrStr **method_out) {
   for (size_t i = 0; i < sizeof normalized / sizeof normalized[0]; i++) {
     const char *candidate = normalized[i];
     size_t n = strlen(candidate);
-    if (method->len != n) continue;
+    if (scr_str_flat_view(method)->len != n) continue;
     bool same = true;
     for (size_t j = 0; j < n && same; j++) {
-      char c = method->data[j];
+      char c = scr_str_flat_view(method)->data[j];
       if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
       same = c == candidate[j];
     }
@@ -3687,9 +3687,9 @@ static bool sf_method_validate(ScrStr **method_out) {
       return true;
     }
   }
-  bool valid = method->len > 0;
-  for (size_t i = 0; i < method->len && valid; i++) {
-    unsigned char c = (unsigned char)method->data[i];
+  bool valid = scr_str_flat_view(method)->len > 0;
+  for (size_t i = 0; i < scr_str_flat_view(method)->len && valid; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(method)->data[i];
     valid = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
             (c >= '0' && c <= '9') ||
             strchr("!#$%&'*+-.^_`|~", c) != NULL;
@@ -3700,11 +3700,11 @@ static bool sf_method_validate(ScrStr **method_out) {
   }
   if (sf_eq_ci(method, "connect") || sf_eq_ci(method, "trace") ||
       sf_eq_ci(method, "track")) {
-    size_t message_len = method->len + 31;
+    size_t message_len = scr_str_flat_view(method)->len + 31;
     char *message = malloc(message_len + 1);
     if (!message) sf_oom();
     int len = snprintf(message, message_len + 1, "'%.*s' HTTP method is unsupported.",
-                       (int)method->len, method->data);
+                       (int)scr_str_flat_view(method)->len, scr_str_flat_view(method)->data);
     if (len < 0 || (size_t)len > message_len) sf_oom();
     sf_type_error(message);
     free(message);
@@ -3724,17 +3724,17 @@ static bool sf_redirect_mode(const ScrDyn *init, int *out) {
   }
   ScrStr *mode = scr_dyn_string_coerce_js(value);
   if (!mode) return false;
-  if (mode->len == 6 && memcmp(mode->data, "follow", 6) == 0) {
+  if (scr_str_flat_view(mode)->len == 6 && memcmp(scr_str_flat_view(mode)->data, "follow", 6) == 0) {
     *out = SF_REDIRECT_FOLLOW;
     scr_str_release(mode);
     return true;
   }
-  if (mode->len == 5 && memcmp(mode->data, "error", 5) == 0) {
+  if (scr_str_flat_view(mode)->len == 5 && memcmp(scr_str_flat_view(mode)->data, "error", 5) == 0) {
     *out = SF_REDIRECT_ERROR;
     scr_str_release(mode);
     return true;
   }
-  if (mode->len == 6 && memcmp(mode->data, "manual", 6) == 0) {
+  if (scr_str_flat_view(mode)->len == 6 && memcmp(scr_str_flat_view(mode)->data, "manual", 6) == 0) {
     *out = SF_REDIRECT_MANUAL;
     scr_str_release(mode);
     return true;
@@ -3743,12 +3743,12 @@ static bool sf_redirect_mode(const ScrDyn *init, int *out) {
   static const char suffix[] =
       " is not an accepted type. Expected one of follow, manual, error.";
   size_t message_len =
-      sizeof prefix - 1 + mode->len + sizeof suffix - 1;
+      sizeof prefix - 1 + scr_str_flat_view(mode)->len + sizeof suffix - 1;
   char *message = malloc(message_len + 1);
   if (!message) sf_oom();
   memcpy(message, prefix, sizeof prefix - 1);
-  memcpy(message + sizeof prefix - 1, mode->data, mode->len);
-  memcpy(message + sizeof prefix - 1 + mode->len,
+  memcpy(message + sizeof prefix - 1, scr_str_flat_view(mode)->data, scr_str_flat_view(mode)->len);
+  memcpy(message + sizeof prefix - 1 + scr_str_flat_view(mode)->len,
          suffix, sizeof suffix - 1);
   message[message_len] = '\0';
   scr_str_release(mode);
@@ -4170,8 +4170,8 @@ static const char sf_not_http_prefix[] = "Response does not match the HTTP/1.1 p
  * that is not HTTP becomes the HTTPParserError. NULL (no cause) for
  * every other message. +1. */
 static ScrDyn *sf_failure_cause(const ScrStr *message) {
-  if (message->len > sizeof sf_tunnel_prefix - 1 &&
-      memcmp(message->data, sf_tunnel_prefix, sizeof sf_tunnel_prefix - 1) == 0) {
+  if (scr_str_flat_view(message)->len > sizeof sf_tunnel_prefix - 1 &&
+      memcmp(scr_str_flat_view(message)->data, sf_tunnel_prefix, sizeof sf_tunnel_prefix - 1) == 0) {
     ScrError *aborted = scr_error_new(SCR_ERR_ERROR, (ScrStr *)message);
     scr_str_release(aborted->name);
     aborted->name = scr_str_new("AbortError", 10);
@@ -4194,8 +4194,8 @@ static ScrDyn *sf_failure_cause(const ScrStr *message) {
     scr_error_release(dom);
     return cause;
   }
-  if (message->len >= sizeof sf_not_http_prefix - 1 &&
-      memcmp(message->data, sf_not_http_prefix, sizeof sf_not_http_prefix - 1) == 0) {
+  if (scr_str_flat_view(message)->len >= sizeof sf_not_http_prefix - 1 &&
+      memcmp(scr_str_flat_view(message)->data, sf_not_http_prefix, sizeof sf_not_http_prefix - 1) == 0) {
     ScrError *parser = scr_error_new(SCR_ERR_ERROR, (ScrStr *)message);
     scr_str_release(parser->name);
     parser->name = scr_str_new("HTTPParserError", 15);
@@ -4204,12 +4204,12 @@ static ScrDyn *sf_failure_cause(const ScrStr *message) {
     scr_error_release(parser);
     return cause;
   }
-  const char *data = message->data;
-  const char *space = memchr(data, ' ', message->len);
+  const char *data = scr_str_flat_view(message)->data;
+  const char *space = memchr(data, ' ', scr_str_flat_view(message)->len);
   if (space == NULL || space == data) return NULL;
   size_t syscall_len = (size_t)(space - data);
   const char *code = space + 1;
-  const char *end = data + message->len;
+  const char *end = data + scr_str_flat_view(message)->len;
   const char *code_end = code;
   while (code_end < end && *code_end != ' ') code_end++;
   char code_buf[32];
@@ -4325,7 +4325,7 @@ static bool sf_redirect(SfTransfer *t, int status,
   if (!next ||
       !(sf_eq_ci(next->scheme, "http") ||
         sf_eq_ci(next->scheme, "https")) ||
-      next->userinfo->len > 0) {
+      scr_str_flat_view(next->userinfo)->len > 0) {
     scr_url_release(next);
     sf_reject(t, "fetch failed");
     return false;
@@ -4355,12 +4355,12 @@ static bool sf_redirect(SfTransfer *t, int status,
   }
 
   bool same_origin =
-      t->url->host->len == next->host->len &&
-      memcmp(t->url->host->data, next->host->data, next->host->len) == 0 &&
+      scr_str_flat_view(t->url->host)->len == scr_str_flat_view(next->host)->len &&
+      memcmp(scr_str_flat_view(t->url->host)->data, scr_str_flat_view(next->host)->data, scr_str_flat_view(next->host)->len) == 0 &&
       sf_port(t->url, 0) == sf_port(next, 0) &&
-      t->url->scheme->len == next->scheme->len &&
-      memcmp(t->url->scheme->data, next->scheme->data,
-             next->scheme->len) == 0;
+      scr_str_flat_view(t->url->scheme)->len == scr_str_flat_view(next->scheme)->len &&
+      memcmp(scr_str_flat_view(t->url->scheme)->data, scr_str_flat_view(next->scheme)->data,
+             scr_str_flat_view(next->scheme)->len) == 0;
   if (!same_origin) {
     sf_strip_header(&t->headers, "authorization");
     sf_strip_header(&t->headers, "proxy-authorization");
@@ -4389,14 +4389,14 @@ static char *sf_tunnel_head(const ScrUrl *url, int port, const char *authority,
   ScrStr *authorization = sf_proxy_has_credentials(proxy->userinfo)
                               ? sf_proxy_authorization(proxy->userinfo)
                               : NULL;
-  size_t cap = url->host->len + authority_len + 160 + (authorization ? authorization->len : 0);
+  size_t cap = scr_str_flat_view(url->host)->len + authority_len + 160 + (authorization ? scr_str_flat_view(authorization)->len : 0);
   char *head = malloc(cap);
   if (!head) sf_oom();
   int n = snprintf(head, cap, "CONNECT %.*s:%d HTTP/1.1\r\nhost: %.*s\r\nconnection: close\r\n",
-                   (int)url->host->len, url->host->data, port, (int)authority_len, authority);
+                   (int)scr_str_flat_view(url->host)->len, scr_str_flat_view(url->host)->data, port, (int)authority_len, authority);
   if (authorization) {
     n += snprintf(head + n, cap - (size_t)n, "proxy-authorization: %.*s\r\n",
-                  (int)authorization->len, authorization->data);
+                  (int)scr_str_flat_view(authorization)->len, scr_str_flat_view(authorization)->data);
     scr_str_release(authorization);
   }
   n += snprintf(head + n, cap - (size_t)n, "proxy-connection: keep-alive\r\n\r\n");
@@ -4452,9 +4452,9 @@ static bool sf_start_hop(SfTransfer *t) {
   int authority_len =
       port == default_port
           ? snprintf(authority, sizeof authority, "%.*s",
-                     (int)url->host->len, url->host->data)
+                     (int)scr_str_flat_view(url->host)->len, scr_str_flat_view(url->host)->data)
           : snprintf(authority, sizeof authority, "%.*s:%d",
-                     (int)url->host->len, url->host->data, port);
+                     (int)scr_str_flat_view(url->host)->len, scr_str_flat_view(url->host)->data, port);
   if (authority_len < 0 ||
       (size_t)authority_len >= sizeof authority) {
     scr_arr_release(headers);
@@ -4500,12 +4500,12 @@ static bool sf_start_hop(SfTransfer *t) {
         scr_str_release(later);
         if (!match) continue;
         ScrStr *next = scr_arr_get_ref(t->headers, (double)(j + 1));
-        size_t joined_len = value->len + 2 + next->len;
+        size_t joined_len = scr_str_flat_view(value)->len + 2 + scr_str_flat_view(next)->len;
         char *joined = malloc(joined_len ? joined_len : 1);
         if (!joined) sf_oom();
-        memcpy(joined, value->data, value->len);
-        memcpy(joined + value->len, ", ", 2);
-        memcpy(joined + value->len + 2, next->data, next->len);
+        memcpy(joined, scr_str_flat_view(value)->data, scr_str_flat_view(value)->len);
+        memcpy(joined + scr_str_flat_view(value)->len, ", ", 2);
+        memcpy(joined + scr_str_flat_view(value)->len + 2, scr_str_flat_view(next)->data, scr_str_flat_view(next)->len);
         scr_str_release(next);
         scr_str_release(value);
         value = scr_str_new(joined, joined_len);
@@ -4952,7 +4952,7 @@ ScrDyn *scr_fetch_request_new(ScrDyn *input, ScrDyn *init) {
   if (!url) sf_throw_url_parse_failure(url_text);
   scr_str_release(url_text);
   if (!url) return NULL;
-  if (url->userinfo->len) { scr_url_release(url); sf_type_error("Request cannot be constructed from a URL that includes credentials"); return NULL; }
+  if (scr_str_flat_view(url->userinfo)->len) { scr_url_release(url); sf_type_error("Request cannot be constructed from a URL that includes credentials"); return NULL; }
   ScrDyn *dictionary = scr_dyn_new_obj();
   ScrDyn *method = sf_response_init_get(init, "method", 6);
   if ((!method || method->kind == SCR_DYN_UNDEF) && source) { scr_dyn_release(method); method = scr_dyn_new_str(source->method); }
@@ -4970,14 +4970,14 @@ ScrDyn *scr_fetch_request_new(ScrDyn *input, ScrDyn *init) {
     scr_dyn_release(body); body = scr_dyn_new_handle(source->payload->body, SCR_DYNH_WEB_STREAM);
   }
   bool has_body = body && body->kind != SCR_DYN_UNDEF && body->kind != SCR_DYN_NULL;
-  if (has_body && (sf_name(method_text->data, method_text->len, "GET") || sf_name(method_text->data, method_text->len, "HEAD"))) {
+  if (has_body && (sf_name(scr_str_flat_view(method_text)->data, scr_str_flat_view(method_text)->len, "GET") || sf_name(scr_str_flat_view(method_text)->data, scr_str_flat_view(method_text)->len, "HEAD"))) {
     scr_dyn_release(body); scr_str_release(method_text); scr_url_release(url); sf_type_error("Request with GET/HEAD method cannot have body."); return NULL;
   }
   if (supplied && body->kind == SCR_DYN_HANDLE && body->v.handle.tag == SCR_DYNH_WEB_STREAM) {
     ScrDyn *duplex = sf_response_init_get(init, "duplex", 6);
     ScrStr *text = duplex && duplex->kind != SCR_DYN_UNDEF ? scr_dyn_string_coerce_js(duplex) : NULL;
     scr_dyn_release(duplex);
-    bool half = text && sf_name(text->data, text->len, "half"); scr_str_release(text);
+    bool half = text && sf_name(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "half"); scr_str_release(text);
     if (!half) { scr_dyn_release(body); scr_str_release(method_text); scr_url_release(url); sf_type_error("RequestInit: duplex option is required when sending a body."); return NULL; }
   }
   ScrDyn *headers = sf_response_init_get(init, "headers", 7);
@@ -5000,7 +5000,7 @@ ScrDyn *scr_fetch_request_new(ScrDyn *input, ScrDyn *init) {
   ScrDyn *redirect = sf_response_init_get(init, "redirect", 8);
   ScrStr *redirect_text = redirect && redirect->kind != SCR_DYN_UNDEF ? scr_dyn_string_coerce_js(redirect) : source ? scr_str_retain(source->redirect) : scr_str_new("follow", 6);
   scr_dyn_release(redirect);
-  if (!redirect_text || !(sf_name(redirect_text->data, redirect_text->len, "follow") || sf_name(redirect_text->data, redirect_text->len, "manual") || sf_name(redirect_text->data, redirect_text->len, "error"))) {
+  if (!redirect_text || !(sf_name(scr_str_flat_view(redirect_text)->data, scr_str_flat_view(redirect_text)->len, "follow") || sf_name(scr_str_flat_view(redirect_text)->data, scr_str_flat_view(redirect_text)->len, "manual") || sf_name(scr_str_flat_view(redirect_text)->data, scr_str_flat_view(redirect_text)->len, "error"))) {
     scr_str_release(redirect_text); sf_signal_release(following); scr_dyn_release(payload); scr_str_release(method_text); scr_url_release(url); sf_type_error("Invalid Request redirect value"); return NULL;
   }
   SfRequest *r = calloc(1, sizeof *r); if (!r) sf_oom();
@@ -5051,9 +5051,9 @@ static void sf_fetch_function_cleanup(void) {
 }
 bool scr_fetch_web_is(const ScrDyn *value, const ScrStr *name) {
   if (value->kind != SCR_DYN_HANDLE) return false;
-  if (sf_name(name->data, name->len, "Response")) return value->v.handle.tag == SCR_DYNH_FETCH_RESPONSE;
-  if (sf_name(name->data, name->len, "Request")) return value->v.handle.tag == SCR_DYNH_FETCH_REQUEST;
-  return sf_name(name->data, name->len, "Headers") && value->v.handle.tag == SCR_DYNH_FETCH_HEADERS;
+  if (sf_name(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, "Response")) return value->v.handle.tag == SCR_DYNH_FETCH_RESPONSE;
+  if (sf_name(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, "Request")) return value->v.handle.tag == SCR_DYNH_FETCH_REQUEST;
+  return sf_name(scr_str_flat_view(name)->data, scr_str_flat_view(name)->len, "Headers") && value->v.handle.tag == SCR_DYNH_FETCH_HEADERS;
 }
 
 bool scr_fetch_stream_is(const ScrDyn *value) {
@@ -5075,21 +5075,21 @@ static int sf_data_hex(unsigned char ch) {
 }
 
 static ScrDyn *sf_data_response(ScrStr *url) {
-  size_t end = url->len;
-  for (size_t i = 5; i < end; i++) if (url->data[i] == '#') { end = i; break; }
+  size_t end = scr_str_flat_view(url)->len;
+  for (size_t i = 5; i < end; i++) if (scr_str_flat_view(url)->data[i] == '#') { end = i; break; }
   size_t comma = 5;
-  while (comma < end && url->data[comma] != ',') comma++;
+  while (comma < end && scr_str_flat_view(url)->data[comma] != ',') comma++;
   if (comma == end) { sf_type_error("fetch failed"); return NULL; }
   size_t meta_end = comma;
-  bool base64 = meta_end >= 12 && strncasecmp(url->data + meta_end - 7, ";base64", 7) == 0;
+  bool base64 = meta_end >= 12 && strncasecmp(scr_str_flat_view(url)->data + meta_end - 7, ";base64", 7) == 0;
   if (base64) meta_end -= 7;
   ScrBytes *bytes = scr_bytes_new(SCR_BYTES_U8, (double)(end - comma - 1));
   size_t n = 0;
   for (size_t i = comma + 1; i < end; i++) {
     int a, b;
-    if (url->data[i] == '%' && i + 2 < end && (a = sf_data_hex(url->data[i + 1])) >= 0 && (b = sf_data_hex(url->data[i + 2])) >= 0) {
+    if (scr_str_flat_view(url)->data[i] == '%' && i + 2 < end && (a = sf_data_hex(scr_str_flat_view(url)->data[i + 1])) >= 0 && (b = sf_data_hex(scr_str_flat_view(url)->data[i + 2])) >= 0) {
       bytes->data[n++] = (unsigned char)((a << 4) | b); i += 2;
-    } else bytes->data[n++] = (unsigned char)url->data[i];
+    } else bytes->data[n++] = (unsigned char)scr_str_flat_view(url)->data[i];
   }
   bytes->len = n;
   if (base64) {
@@ -5099,9 +5099,9 @@ static ScrDyn *sf_data_response(ScrStr *url) {
     scr_str_release(encoded); scr_str_release(encoding); scr_bytes_release(bytes); bytes = decoded;
   }
   ScrDyn *body = scr_dyn_new_bytes(bytes); scr_bytes_release(bytes);
-  ScrStr *mime = meta_end == 5 ? scr_str_new("text/plain;charset=US-ASCII", 26) : scr_str_new(url->data + 5, meta_end - 5);
-  if (mime->len && mime->data[0] == ';') {
-    ScrJsonBuf b; scr_jb_init(&b); scr_jb_puts(&b, "text/plain"); scr_jb_write(&b, mime->data, mime->len);
+  ScrStr *mime = meta_end == 5 ? scr_str_new("text/plain;charset=US-ASCII", 26) : scr_str_new(scr_str_flat_view(url)->data + 5, meta_end - 5);
+  if (scr_str_flat_view(mime)->len && scr_str_flat_view(mime)->data[0] == ';') {
+    ScrJsonBuf b; scr_jb_init(&b); scr_jb_puts(&b, "text/plain"); scr_jb_write(&b, scr_str_flat_view(mime)->data, scr_str_flat_view(mime)->len);
     scr_str_release(mime); mime = scr_jb_finish(&b);
   }
   ScrDyn *headers = scr_dyn_new_obj(); scr_dyn_obj_set(headers, "content-type", 12, scr_dyn_new_str(mime)); scr_str_release(mime);
@@ -5110,7 +5110,7 @@ static ScrDyn *sf_data_response(ScrStr *url) {
   ScrDyn *result = scr_fetch_response_new(body, init); scr_dyn_release(body); scr_dyn_release(init);
   if (result) {
     SfResponse *response = result->v.handle.ptr;
-    scr_str_release(response->url); response->url = scr_str_new(url->data, end);
+    scr_str_release(response->url); response->url = scr_str_new(scr_str_flat_view(url)->data, end);
     response->headers->immutable = true;
   }
   return result;
@@ -5204,8 +5204,8 @@ ScrPromise *scr_fetch_static(ScrStr *url, ScrDyn *init) {
       return sf_reject_now(promise, "fetch failed");
     }
     duplex_half =
-        duplex_mode->len == 4 &&
-        memcmp(duplex_mode->data, "half", 4) == 0;
+        scr_str_flat_view(duplex_mode)->len == 4 &&
+        memcmp(scr_str_flat_view(duplex_mode)->data, "half", 4) == 0;
     scr_str_release(duplex_mode);
   }
   if (duplex_present && !duplex_half) {
@@ -5266,14 +5266,14 @@ ScrPromise *scr_fetch_static(ScrStr *url, ScrDyn *init) {
     scr_promise_reject_pending(promise);
     return promise;
   }
-  if (u->userinfo->len > 0) {
+  if (scr_str_flat_view(u->userinfo)->len > 0) {
     static const char prefix[] =
         "Request cannot be constructed from a URL that includes credentials: ";
-    size_t message_len = sizeof prefix - 1 + url->len;
+    size_t message_len = sizeof prefix - 1 + scr_str_flat_view(url)->len;
     char *message = malloc(message_len + 1);
     if (!message) sf_oom();
     memcpy(message, prefix, sizeof prefix - 1);
-    memcpy(message + sizeof prefix - 1, url->data, url->len);
+    memcpy(message + sizeof prefix - 1, scr_str_flat_view(url)->data, scr_str_flat_view(url)->len);
     message[message_len] = '\0';
     sf_type_error(message);
     free(message);
@@ -5309,8 +5309,8 @@ ScrPromise *scr_fetch_static(ScrStr *url, ScrDyn *init) {
         "RequestInit: duplex option is required when sending a body.");
   }
   if (body_present &&
-      ((method->len == 3 && memcmp(method->data, "GET", 3) == 0) ||
-       (method->len == 4 && memcmp(method->data, "HEAD", 4) == 0))) {
+      ((scr_str_flat_view(method)->len == 3 && memcmp(scr_str_flat_view(method)->data, "GET", 3) == 0) ||
+       (scr_str_flat_view(method)->len == 4 && memcmp(scr_str_flat_view(method)->data, "HEAD", 4) == 0))) {
     scr_dyn_release(coerced_body);
     scr_arr_release(headers);
     scr_str_release(method);
@@ -5341,7 +5341,7 @@ ScrPromise *scr_fetch_static(ScrStr *url, ScrDyn *init) {
         !body_present
             ? 0
             : body->kind == SCR_DYN_STR
-                ? body->v.str->len
+                ? scr_str_flat_view(body->v.str)->len
                 : body->v.bytes->len;
     if (body_length != content_length) {
       scr_dyn_release(coerced_body);

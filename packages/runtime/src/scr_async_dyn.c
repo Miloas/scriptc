@@ -373,7 +373,7 @@ static ScrStr *scr_rejection_reason_text(const ScrDyn *reason, const ScrDyn *vie
     const ScrStr *typed = reason->kind == SCR_DYN_TYPED_REF ? scr_dyn_typed_ref_class_name(reason) : NULL;
     ScrStr *parts[3] = {
       scr_str_new("#<", 2),
-      typed ? scr_str_new(typed->data, typed->len) : scr_str_new(name ? name : "Object", name ? strlen(name) : 6),
+      typed ? scr_str_new(scr_str_flat_view(typed)->data, scr_str_flat_view(typed)->len) : scr_str_new(name ? name : "Object", name ? strlen(name) : 6),
       scr_str_new(">", 1),
     };
     ScrStr *text = scr_str_concat_parts(parts, 3);
@@ -790,7 +790,7 @@ static ScrStr *scr_warning_name(const ScrDyn *w) {
 
 static bool scr_warning_is_deprecation(const ScrDyn *w) {
   ScrStr *name = scr_warning_name(w);
-  bool deprecation = name && name->len == 18 && memcmp(name->data, "DeprecationWarning", 18) == 0;
+  bool deprecation = name && scr_str_flat_view(name)->len == 18 && memcmp(scr_str_flat_view(name)->data, "DeprecationWarning", 18) == 0;
   scr_str_release(name);
   return deprecation;
 }
@@ -949,7 +949,7 @@ static void scr_warn_text_tick(void) {
 }
 
 void scr_process_emit_warning_text(ScrStr *message) {
-  if (message->len == 0) return;
+  if (scr_str_flat_view(message)->len == 0) return;
   if (!scr_warn_texts_registered) {
     scr_warn_texts_registered = true;
     scr_atexit(scr_warn_texts_teardown);
@@ -1157,11 +1157,11 @@ static void scr_dyn_throw_incompatible_receiver(const char *method, const ScrDyn
   } else if (self->kind == SCR_DYN_BOOL) {
     text = self->v.b ? "true" : "false";
   } else if (self->kind == SCR_DYN_STR) {
-    snprintf(shown, sizeof shown, "%.*s", (int)(self->v.str->len < 48 ? self->v.str->len : 48), self->v.str->data);
+    snprintf(shown, sizeof shown, "%.*s", (int)(scr_str_flat_view(self->v.str)->len < 48 ? scr_str_flat_view(self->v.str)->len : 48), scr_str_flat_view(self->v.str)->data);
     text = shown;
   } else if (self->kind == SCR_DYN_NUM) {
     ScrStr *s = scr_f64_to_scrstr(self->v.num);
-    snprintf(shown, sizeof shown, "%.*s", (int)s->len, s->data);
+    snprintf(shown, sizeof shown, "%.*s", (int)scr_str_flat_view(s)->len, scr_str_flat_view(s)->data);
     scr_str_release(s);
     text = shown;
   }
@@ -1511,8 +1511,8 @@ static ScrDyn *scr_crypto_digest_call(ScrClosure *closure, ScrDyn *const *args, 
   if (!bytes && argc > 1 && scr_array_buffer_is(args[1])) bytes = scr_array_buffer_view(SCR_BYTES_U8, args[1], scr_dyn_undefined(), scr_dyn_undefined());
   const char *native = NULL;
   if (text) {
-    if (text->len == 7 && strncasecmp(text->data, "SHA-256", 7) == 0) native = "sha256";
-    else if (text->len == 5 && strncasecmp(text->data, "SHA-1", 5) == 0) native = "sha1";
+    if (scr_str_flat_view(text)->len == 7 && strncasecmp(scr_str_flat_view(text)->data, "SHA-256", 7) == 0) native = "sha256";
+    else if (scr_str_flat_view(text)->len == 5 && strncasecmp(scr_str_flat_view(text)->data, "SHA-1", 5) == 0) native = "sha1";
   }
   if (!text || !bytes || !native) {
     static const char message[] = "Unsupported WebCrypto digest algorithm or BufferSource";

@@ -96,6 +96,7 @@ function emitStringSwitch(
   labels: readonly string[],
   fallback: string,
 ): boolean {
+  if (host.quickjsStrings) return false;
   const groups = new Map<number, { value: string; label: string }[]>();
   const seen = new Set<string>();
   for (let index = 0; index < cases.length; index++) {

@@ -1,6 +1,8 @@
 #include "scr_runtime.h"
 #include "scr_key.h"
 #include "scr_collation_data.h"
+#define SCR_PROTO_STRING_IMPL 1
+#include "scr_string_quickjs_prototype.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -43,8 +45,8 @@ static inline size_t scr_short_slot(uint32_t word, size_t len) {
 }
 
 static void scr_short_forget(const ScrStr *s) {
-  if (s->len < 2 || s->len > 4) return;
-  size_t h = scr_short_slot(scr_short_word(s->data, s->len), s->len);
+  if (scr_str_flat_view(s)->len < 2 || scr_str_flat_view(s)->len > 4) return;
+  size_t h = scr_short_slot(scr_short_word(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len), scr_str_flat_view(s)->len);
   if (scr_short_tab[h] == s) scr_short_tab[h] = NULL;
 }
 
@@ -226,7 +228,7 @@ static ScrSidx *scr_sidx_claim(ScrSidx *table, unsigned *clock, unsigned *live) 
 static SCR_TL ScrSidx *scr_sidx_last; /* most recent hit; a slot, never freed */
 
 static ScrSidx *scr_sidx_lookup(const ScrStr *s) {
-  if (s->len >= SCR_SIDX_MIN_BYTES) {
+  if (scr_str_flat_view(s)->len >= SCR_SIDX_MIN_BYTES) {
     for (int i = 0; i < SCR_SIDX_N; i++) {
       if (scr_sidx_sparse_tab[i].s == s) return &scr_sidx_sparse_tab[i];
     }
@@ -268,7 +270,7 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
    * threshold; only the lookup performs that transfer, so the memo must
    * also match the receiver's current tier. */
   bool sparse = (uintptr_t)last - (uintptr_t)scr_sidx_sparse_tab < sizeof scr_sidx_sparse_tab;
-  if (last && last->s == s && sparse == (s->len >= SCR_SIDX_MIN_BYTES)) return last;
+  if (last && last->s == s && sparse == (scr_str_flat_view(s)->len >= SCR_SIDX_MIN_BYTES)) return last;
   return scr_sidx_last = scr_sidx_lookup(s);
 }
 
@@ -310,7 +312,7 @@ static void scr_sidx_concat_append(const ScrStr *s, size_t oldlen) {
 /* ── allocation ─────────────────────────────────────────────────────── */
 
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
-  if (len > cap || cap > SCR_STR_MAX_CAP) scr_oom();
+  if (len > cap || cap > SCR_STR_MAX_CAP || (SCR_QUICKJS_STRINGS && cap == SCR_STR_MAX_CAP)) scr_oom();
   ScrStr *s = scr_mem_alloc(sizeof(ScrStr) + cap + 1 + scr_str_length_cache_size(cap));
   if (!s) scr_oom();
   s->rc = 1;
@@ -361,8 +363,8 @@ ScrStr *scr_str_new(const char *bytes, size_t len) {
   ScrStr *s = scr_str_alloc(len, len);
   /* Proving ASCII while copying lets every later UTF-16 index, length and
    * slice skip the index cache. */
-  bool ascii = scr_copy_bytes_ascii(s->data, bytes, len);
-  s->data[len] = '\0';
+  bool ascii = scr_copy_bytes_ascii(scr_str_flat_view(s)->data, bytes, len);
+  scr_str_flat_view(s)->data[len] = '\0';
   s->ascii = ascii;
   return s;
 }
@@ -371,8 +373,8 @@ ScrStr *scr_str_new(const char *bytes, size_t len) {
  * string): no scan. */
 static ScrStr *scr_str_new_ascii(const char *bytes, size_t len) {
   ScrStr *s = scr_str_alloc(len, len);
-  scr_copy_bytes(s->data, bytes, len);
-  s->data[len] = '\0';
+  scr_copy_bytes(scr_str_flat_view(s)->data, bytes, len);
+  scr_str_flat_view(s)->data[len] = '\0';
   s->ascii = 1;
   return s;
 }
@@ -395,7 +397,7 @@ static ScrStr *scr_str_take_spare(size_t len) {
   if (s && s->cap >= len && s->cap / 4 <= len) {
     scr_str_spare = NULL;
     s->rc = 1;
-    s->len = len; /* keeps its larger cap */
+    scr_str_flat_view(s)->len = len; /* keeps its larger cap */
     scr_str_hash_forget(s);
     return s;
   }
@@ -411,12 +413,13 @@ static ScrStr *scr_str_take_spare(size_t len) {
 ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
   ScrStr *s = scr_str_take_spare(cap);
   if (!s) return scr_str_alloc(len, cap);
-  s->len = len; /* keeps its (possibly larger) cap */
+  scr_str_flat_view(s)->len = len; /* keeps its (possibly larger) cap */
   return s;
 }
 
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
-  if (newcap < s->len || newcap > SCR_STR_MAX_CAP) scr_oom();
+  if (newcap < scr_str_flat_view(s)->len || newcap > SCR_STR_MAX_CAP ||
+      (SCR_QUICKJS_STRINGS && newcap == SCR_STR_MAX_CAP)) scr_oom();
   scr_short_forget(s);
   scr_str_hash_forget(s);
   scr_sidx_purge(s); /* realloc may move; the old address may be recycled */
@@ -428,6 +431,7 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
 }
 
 void scr_str_release(ScrStr *s) {
+  if (scr_proto_is(s)) { scr_proto_release(s); return; }
   if (!s || s->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--s->rc == 0) {
     scr_short_forget(s);
@@ -452,23 +456,24 @@ void scr_str_release(ScrStr *s) {
 /* a + b where a ends with a lone high surrogate and b starts with a lone
  * low one: the two units become one 4-byte character (scr_runtime.h). */
 static __attribute__((noinline, cold)) ScrStr *scr_str_concat_joined(ScrStr *a, ScrStr *b) {
-  size_t newlen = a->len + b->len;
+  size_t newlen = scr_str_flat_view(a)->len + scr_str_flat_view(b)->len;
   ScrStr *s = scr_str_alloc(newlen, newlen);
-  memcpy(s->data, a->data, a->len);
-  memcpy(s->data + a->len, b->data, b->len + 1);
-  scr_str_fuse_from(s, a->len - 3);
+  memcpy(scr_str_flat_view(s)->data, scr_str_flat_view(a)->data, scr_str_flat_view(a)->len);
+  memcpy(scr_str_flat_view(s)->data + scr_str_flat_view(a)->len, scr_str_flat_view(b)->data, scr_str_flat_view(b)->len + 1);
+  scr_str_fuse_from(s, scr_str_flat_view(a)->len - 3);
   return s;
 }
 
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
-  if (a->len == 0) return scr_str_retain(b);
-  if (b->len == 0) return scr_str_retain(a);
-  if (a->len > SIZE_MAX - b->len - sizeof(ScrStr) - 1) scr_oom();
+  if (scr_proto_is(a) || scr_proto_is(b)) return scr_proto_concat(a, b);
+  if (scr_str_flat_view(a)->len == 0) return scr_str_retain(b);
+  if (scr_str_flat_view(b)->len == 0) return scr_str_retain(a);
+  if (scr_str_flat_view(a)->len > SIZE_MAX - scr_str_flat_view(b)->len - sizeof(ScrStr) - 1) scr_oom();
   /* Only two strings that are not proven ASCII can complete a pair. */
   if (__builtin_expect(scr_wtf8_any(), 0) && !a->ascii && !b->ascii &&
-      scr_wtf8_joins(a->data, a->len, b->data, b->len))
+      scr_wtf8_joins(scr_str_flat_view(a)->data, scr_str_flat_view(a)->len, scr_str_flat_view(b)->data, scr_str_flat_view(b)->len))
     return scr_str_concat_joined(a, b);
-  size_t newlen = a->len + b->len;
+  size_t newlen = scr_str_flat_view(a)->len + scr_str_flat_view(b)->len;
   /* In-place append: a is uniquely owned by the caller's borrow (rc == 1 —
    * never an interned literal, those are SIZE_MAX) and has room. Fires on
    * concat chains (`a + b + c`, template literals), where each intermediate
@@ -476,12 +481,12 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * with rc > 1 might be aliased and is copied, never mutated. */
   bool ascii = a->ascii && b->ascii;
   if (a->rc == 1 && a != b && a->cap >= newlen) {
-    size_t oldlen = a->len;
+    size_t oldlen = scr_str_flat_view(a)->len;
     scr_short_forget(a);
     scr_str_hash_forget(a);
-    scr_copy_bytes(a->data + a->len, b->data, b->len);
-    a->len = newlen;
-    a->data[newlen] = '\0';
+    scr_copy_bytes(scr_str_flat_view(a)->data + scr_str_flat_view(a)->len, scr_str_flat_view(b)->data, scr_str_flat_view(b)->len);
+    scr_str_flat_view(a)->len = newlen;
+    scr_str_flat_view(a)->data[newlen] = '\0';
     a->ascii = ascii;
     /* A cached UTF-16 length for a is stale now; checkpoints and the exact
      * old prefix remain valid. Its old terminal point is no longer an END
@@ -511,9 +516,9 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   if (newcap > SCR_STR_MAX_CAP && newlen <= SCR_STR_MAX_CAP) newcap = SCR_STR_MAX_CAP;
   ScrStr *s = scr_str_take_spare(newlen);
   if (!s) s = scr_str_alloc(newlen, newcap);
-  scr_copy_bytes(s->data, a->data, a->len);
-  scr_copy_bytes(s->data + a->len, b->data, b->len);
-  s->data[newlen] = '\0';
+  scr_copy_bytes(scr_str_flat_view(s)->data, scr_str_flat_view(a)->data, scr_str_flat_view(a)->len);
+  scr_copy_bytes(scr_str_flat_view(s)->data + scr_str_flat_view(a)->len, scr_str_flat_view(b)->data, scr_str_flat_view(b)->len);
+  scr_str_flat_view(s)->data[newlen] = '\0';
   s->ascii = ascii;
   return s;
 }
@@ -523,7 +528,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
  * number, which is ASCII. */
 static bool scr_str_parts_lead_low(ScrStr *const *parts, size_t count) {
   bool lead_low = false;
-  for (size_t i = 0; i < count; i++) lead_low |= parts[i] && scr_wtf8_low_at(parts[i]->data);
+  for (size_t i = 0; i < count; i++) lead_low |= parts[i] && scr_wtf8_low_at(scr_str_flat_view(parts[i])->data);
   return lead_low;
 }
 
@@ -539,8 +544,8 @@ static size_t scr_str_first_seam(const ScrStr *out, size_t at, ScrStr *const *pa
       at += scr_f64_to_str(nums[i], text);
       continue;
     }
-    if (part->len && scr_wtf8_joins(out->data, at, part->data, part->len)) return at;
-    at += part->len;
+    if (scr_str_flat_view(part)->len && scr_wtf8_joins(scr_str_flat_view(out)->data, at, scr_str_flat_view(part)->data, scr_str_flat_view(part)->len)) return at;
+    at += scr_str_flat_view(part)->len;
   }
   return 0;
 }
@@ -563,7 +568,7 @@ scr_str_concat_mixed_bytes(ScrStr *head, ScrStr *const *parts, const double *num
   bool ascii = !head || head->ascii; /* formatted numbers are ASCII */
   for (size_t i = 0; i < count; i++) {
     if (parts[i]) {
-      lens[i] = parts[i]->len;
+      lens[i] = scr_str_flat_view(parts[i])->len;
       aliased |= parts[i] == head;
       ascii &= parts[i]->ascii;
     } else {
@@ -572,13 +577,13 @@ scr_str_concat_mixed_bytes(ScrStr *head, ScrStr *const *parts, const double *num
     if (lens[i] > limit - extra) scr_oom();
     extra += lens[i];
   }
-  size_t base = head ? head->len : 0;
+  size_t base = head ? scr_str_flat_view(head)->len : 0;
   if (extra > limit - base) scr_oom();
   size_t newlen = base + extra;
   if (head && extra == 0) return scr_str_retain(head);
   ScrStr *out;
   size_t at;
-  if (head && head->rc == 1 && !aliased && head->cap >= newlen) {
+  if (head && !scr_proto_is(head) && head->rc == 1 && !aliased && head->cap >= newlen) {
     /* See scr_str_concat's in-place append. */
     scr_short_forget(head);
     scr_str_hash_forget(head);
@@ -586,7 +591,7 @@ scr_str_concat_mixed_bytes(ScrStr *head, ScrStr *const *parts, const double *num
     at = base;
   } else {
     size_t newcap = newlen;
-    if (head && head->rc == 1) {
+    if (head && !scr_proto_is(head) && head->rc == 1) {
       size_t grown = (size_t)head->cap + (head->cap >> 1) + 16;
       if (grown > newcap) newcap = grown;
     } else if (newlen >= 512 && newlen <= (SIZE_MAX - sizeof(ScrStr) - 1) / 2) {
@@ -595,15 +600,15 @@ scr_str_concat_mixed_bytes(ScrStr *head, ScrStr *const *parts, const double *num
     if (newcap > SCR_STR_MAX_CAP) newcap = SCR_STR_MAX_CAP;
     out = scr_str_take_spare(newlen);
     if (!out) out = scr_str_alloc(newlen, newcap);
-    if (base) scr_copy_bytes(out->data, head->data, base);
+    if (base) scr_copy_bytes(scr_str_flat_view(out)->data, scr_str_flat_view(head)->data, base);
     at = base;
   }
   for (size_t i = 0; i < count; i++) {
-    scr_copy_bytes(out->data + at, parts[i] ? parts[i]->data : text[i], lens[i]);
+    scr_copy_bytes(scr_str_flat_view(out)->data + at, parts[i] ? scr_str_flat_view(parts[i])->data : text[i], lens[i]);
     at += lens[i];
   }
-  out->len = newlen;
-  out->data[newlen] = '\0';
+  scr_str_flat_view(out)->len = newlen;
+  scr_str_flat_view(out)->data[newlen] = '\0';
   out->ascii = ascii;
   if (out == head) {
     if (!ascii) scr_sidx_concat_append(head, base); /* see scr_str_concat */
@@ -621,9 +626,9 @@ static __attribute__((noinline)) void scr_str_concat_rejoin(ScrStr *out, ScrStr 
   size_t extra = 0;
   for (size_t i = 0; i < count; i++) {
     char text[32];
-    extra += parts[i] ? parts[i]->len : scr_f64_to_str(nums[i], text);
+    extra += parts[i] ? scr_str_flat_view(parts[i])->len : scr_f64_to_str(nums[i], text);
   }
-  size_t seam = scr_str_first_seam(out, out->len - extra, parts, nums, count);
+  size_t seam = scr_str_first_seam(out, scr_str_flat_view(out)->len - extra, parts, nums, count);
   if (seam) scr_str_fuse_from(out, seam - 3);
 }
 
@@ -669,25 +674,25 @@ static __attribute__((noinline)) ScrStr *scr_str_concat_fresh(ScrStr *const *par
   size_t reserve = 0;
   bool ascii = true;
   for (size_t i = 0; i < count; i++) {
-    size_t n = parts[i] ? parts[i]->len : SCR_F64_TEXT_MAX;
+    size_t n = parts[i] ? scr_str_flat_view(parts[i])->len : SCR_F64_TEXT_MAX;
     if (n > SCR_STR_MAX_CAP - reserve) scr_oom();
     reserve += n;
     if (parts[i]) ascii &= parts[i]->ascii;
   }
   ScrStr *out = scr_str_take_spare(reserve);
   if (!out) out = scr_str_alloc(reserve, reserve);
-  char *w = out->data;
+  char *w = scr_str_flat_view(out)->data;
   for (size_t i = 0; i < count; i++) {
     if (parts[i]) {
-      scr_copy_bytes(w, parts[i]->data, parts[i]->len);
-      w += parts[i]->len;
+      scr_copy_bytes(w, scr_str_flat_view(parts[i])->data, scr_str_flat_view(parts[i])->len);
+      w += scr_str_flat_view(parts[i])->len;
     } else {
       w += scr_f64_to_str(nums[i], w);
     }
   }
-  size_t len = (size_t)(w - out->data);
-  out->len = len;
-  out->data[len] = '\0';
+  size_t len = (size_t)(w - scr_str_flat_view(out)->data);
+  scr_str_flat_view(out)->len = len;
+  scr_str_flat_view(out)->data[len] = '\0';
   out->ascii = ascii;
   return out;
 }
@@ -706,16 +711,16 @@ ScrStr *scr_str_concat_move(ScrStr *a, ScrStr *b) {
 
 ScrStr *scr_str_concat_move_char_code(ScrStr *a, double code) {
   uint32_t cp = scr_to_uint32(code) & 0xFFFFu;
-  if (cp < 0x80 && a->rc == 1 && a->cap > a->len) {
+  if (cp < 0x80 && !scr_proto_is(a) && a->rc == 1 && a->cap > scr_str_flat_view(a)->len) {
     /* scr_str_concat's in-place append of one ASCII byte: the string stays
      * ASCII if it was, and a non-ASCII string's index facts below the old
      * end stay valid (scr_sidx_concat_append). */
-    size_t oldlen = a->len;
+    size_t oldlen = scr_str_flat_view(a)->len;
     scr_short_forget(a);
     scr_str_hash_forget(a);
-    a->data[oldlen] = (char)cp;
-    a->len = oldlen + 1;
-    a->data[oldlen + 1] = '\0';
+    scr_str_flat_view(a)->data[oldlen] = (char)cp;
+    scr_str_flat_view(a)->len = oldlen + 1;
+    scr_str_flat_view(a)->data[oldlen + 1] = '\0';
     if (!a->ascii) scr_sidx_concat_append(a, oldlen);
     return a;
   }
@@ -737,18 +742,19 @@ ScrStr *scr_str_concat_mixed_move(ScrStr *head, ScrStr *const *parts, const doub
 }
 
 ScrStr *scr_str_concat_f64(ScrStr *a, double x) {
+  if (scr_proto_is(a)) return scr_proto_concat_f64(a, x);
   /* A head that cannot grow in place (a literal or a shared string): the
    * result is exactly its bytes and the number's. Digits complete no
    * surrogate pair, so no seam needs joining. */
   if (a->rc != 1) {
     char text[SCR_F64_TEXT_MAX];
     size_t n = scr_f64_to_str(x, text);
-    if (a->len > SCR_STR_MAX_CAP - n) scr_oom();
-    size_t len = a->len + n;
+    if (scr_str_flat_view(a)->len > SCR_STR_MAX_CAP - n) scr_oom();
+    size_t len = scr_str_flat_view(a)->len + n;
     ScrStr *out = scr_str_alloc(len, len);
-    scr_copy_bytes(out->data, a->data, a->len);
-    scr_copy_bytes(out->data + a->len, text, n);
-    out->data[len] = '\0';
+    scr_copy_bytes(scr_str_flat_view(out)->data, scr_str_flat_view(a)->data, scr_str_flat_view(a)->len);
+    scr_copy_bytes(scr_str_flat_view(out)->data + scr_str_flat_view(a)->len, text, n);
+    scr_str_flat_view(out)->data[len] = '\0';
     out->ascii = a->ascii;
     return out;
   }
@@ -757,12 +763,13 @@ ScrStr *scr_str_concat_f64(ScrStr *a, double x) {
 }
 
 ScrStr *scr_str_concat_parts(ScrStr *const *parts, size_t count) {
+  for (size_t i = 0; i < count; i++) if (scr_proto_is(parts[i])) return scr_proto_concat_parts(parts, count);
   const size_t limit = SIZE_MAX - sizeof(ScrStr) - 1;
   size_t len = 0;
   ScrStr *only = NULL;
   size_t nonempty = 0;
   for (size_t i = 0; i < count; i++) {
-    const size_t n = parts[i]->len;
+    const size_t n = scr_str_flat_view(parts[i])->len;
     if (n > limit - len) scr_oom();
     len += n;
     if (n != 0) {
@@ -776,11 +783,11 @@ ScrStr *scr_str_concat_parts(ScrStr *const *parts, size_t count) {
   bool ascii = true;
   for (size_t i = 0; i < count; i++) {
     const ScrStr *part = parts[i];
-    scr_copy_bytes(out->data + offset, part->data, part->len);
-    offset += part->len;
+    scr_copy_bytes(scr_str_flat_view(out)->data + offset, scr_str_flat_view(part)->data, scr_str_flat_view(part)->len);
+    offset += scr_str_flat_view(part)->len;
     ascii &= part->ascii;
   }
-  out->data[len] = '\0';
+  scr_str_flat_view(out)->data[len] = '\0';
   out->ascii = ascii;
   if (__builtin_expect(scr_wtf8_any(), 0) && !ascii && scr_str_parts_lead_low(parts, count)) {
     size_t seam = scr_str_first_seam(out, 0, parts, NULL, count);
@@ -790,14 +797,15 @@ ScrStr *scr_str_concat_parts(ScrStr *const *parts, size_t count) {
 }
 
 bool scr_str_eq(ScrStr *a, ScrStr *b) {
-  return a == b || (a->len == b->len && scr_key_equal(a->data, b->data, a->len));
+  if (scr_proto_is(a) || scr_proto_is(b)) return scr_proto_eq(a, b);
+  return a == b || (scr_str_flat_view(a)->len == scr_str_flat_view(b)->len && scr_key_equal(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, scr_str_flat_view(a)->len));
 }
 
 int scr_str_cmp(ScrStr *a, ScrStr *b) {
-  size_t min = a->len < b->len ? a->len : b->len;
-  int c = memcmp(a->data, b->data, min);
+  size_t min = scr_str_flat_view(a)->len < scr_str_flat_view(b)->len ? scr_str_flat_view(a)->len : scr_str_flat_view(b)->len;
+  int c = memcmp(scr_str_flat_view(a)->data, scr_str_flat_view(b)->data, min);
   if (c != 0) return c;
-  return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);
+  return scr_str_flat_view(a)->len < scr_str_flat_view(b)->len ? -1 : (scr_str_flat_view(a)->len > scr_str_flat_view(b)->len ? 1 : 0);
 }
 
 static inline uint32_t scr_utf8_decode(const char *p, size_t *adv);
@@ -808,12 +816,12 @@ static __attribute__((noinline)) int scr_str_cmp_u16_units(const ScrStr *a, cons
   size_t ia = i, ib = i;
   uint32_t pa = 0, pb = 0; /* a pending low surrogate */
   for (;;) {
-    if (!pa && ia == a->len) return pb || ib < b->len ? -1 : 0;
-    if (!pb && ib == b->len) return 1;
+    if (!pa && ia == scr_str_flat_view(a)->len) return pb || ib < scr_str_flat_view(b)->len ? -1 : 0;
+    if (!pb && ib == scr_str_flat_view(b)->len) return 1;
     uint32_t ua = pa, ub = pb;
     size_t adv;
     if (!ua) {
-      uint32_t cp = scr_utf8_decode(a->data + ia, &adv);
+      uint32_t cp = scr_utf8_decode(scr_str_flat_view(a)->data + ia, &adv);
       ia += adv;
       if (cp >= 0x10000) {
         ua = 0xD800 + ((cp - 0x10000) >> 10);
@@ -825,7 +833,7 @@ static __attribute__((noinline)) int scr_str_cmp_u16_units(const ScrStr *a, cons
       pa = 0;
     }
     if (!ub) {
-      uint32_t cp = scr_utf8_decode(b->data + ib, &adv);
+      uint32_t cp = scr_utf8_decode(scr_str_flat_view(b)->data + ib, &adv);
       ib += adv;
       if (cp >= 0x10000) {
         ub = 0xD800 + ((cp - 0x10000) >> 10);
@@ -847,24 +855,25 @@ static __attribute__((noinline)) int scr_str_cmp_u16_units(const ScrStr *a, cons
  * with a UTF-16 high surrogate below U+E000. A lone surrogate against a
  * supplementary character compares their units. */
 int scr_str_cmp_u16(ScrStr *a, ScrStr *b) {
+  if (scr_proto_is(a) || scr_proto_is(b)) return scr_proto_cmp(a, b);
   if (a == b) return 0;
-  size_t common = a->len < b->len ? a->len : b->len;
+  size_t common = scr_str_flat_view(a)->len < scr_str_flat_view(b)->len ? scr_str_flat_view(a)->len : scr_str_flat_view(b)->len;
   size_t i = 0;
   while (common - i >= sizeof(uint64_t)) {
     uint64_t left, right;
-    memcpy(&left, a->data + i, sizeof(left));
-    memcpy(&right, b->data + i, sizeof(right));
+    memcpy(&left, scr_str_flat_view(a)->data + i, sizeof(left));
+    memcpy(&right, scr_str_flat_view(b)->data + i, sizeof(right));
     if (left != right) break;
     i += sizeof(left);
   }
-  while (i < common && a->data[i] == b->data[i]) i++;
-  if (i == common) return (a->len > b->len) - (a->len < b->len);
-  unsigned char left = (unsigned char)a->data[i];
-  unsigned char right = (unsigned char)b->data[i];
+  while (i < common && scr_str_flat_view(a)->data[i] == scr_str_flat_view(b)->data[i]) i++;
+  if (i == common) return (scr_str_flat_view(a)->len > scr_str_flat_view(b)->len) - (scr_str_flat_view(a)->len < scr_str_flat_view(b)->len);
+  unsigned char left = (unsigned char)scr_str_flat_view(a)->data[i];
+  unsigned char right = (unsigned char)scr_str_flat_view(b)->data[i];
   if (left >= 0xf0 && right >= 0xee && right <= 0xef) return -1;
   if (right >= 0xf0 && left >= 0xee && left <= 0xef) return 1;
-  if (__builtin_expect((left == 0xed && right >= 0xf0 && scr_wtf8_surrogate_at(a->data + i)) ||
-                           (right == 0xed && left >= 0xf0 && scr_wtf8_surrogate_at(b->data + i)),
+  if (__builtin_expect((left == 0xed && right >= 0xf0 && scr_wtf8_surrogate_at(scr_str_flat_view(a)->data + i)) ||
+                           (right == 0xed && left >= 0xf0 && scr_wtf8_surrogate_at(scr_str_flat_view(b)->data + i)),
                        0))
     return scr_str_cmp_u16_units(a, b, i);
   return left < right ? -1 : 1;
@@ -902,7 +911,7 @@ static ScrStr *scr_str_from_span(const char *bytes, size_t len) {
     uint32_t word = scr_short_word(bytes, len);
     size_t h = scr_short_slot(word, len);
     ScrStr *cached = scr_short_tab[h];
-    if (cached && cached->len == len && scr_short_word(cached->data, len) == word)
+    if (cached && scr_str_flat_view(cached)->len == len && scr_short_word(scr_str_flat_view(cached)->data, len) == word)
       return scr_str_retain(cached);
     ScrStr *s = scr_str_new(bytes, len);
     scr_short_tab[h] = s;
@@ -1054,16 +1063,16 @@ void scr_str_fuse_from(ScrStr *s, size_t from) {
   scr_short_forget(s);
   scr_str_hash_forget(s);
   scr_sidx_purge(s);
-  s->len = from + scr_wtf8_fuse(s->data + from, s->len - from);
-  s->data[s->len] = '\0';
+  scr_str_flat_view(s)->len = from + scr_wtf8_fuse(scr_str_flat_view(s)->data + from, scr_str_flat_view(s)->len - from);
+  scr_str_flat_view(s)->data[scr_str_flat_view(s)->len] = '\0';
 }
 
 __attribute__((noinline, cold)) void scr_str_fuse_surrogates(ScrStr *s) {
   scr_short_forget(s);
   scr_str_hash_forget(s);
   scr_sidx_purge(s);
-  s->len = scr_wtf8_fuse(s->data, s->len);
-  s->data[s->len] = '\0';
+  scr_str_flat_view(s)->len = scr_wtf8_fuse(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  scr_str_flat_view(s)->data[scr_str_flat_view(s)->len] = '\0';
 }
 
 void scr_wtf8_replace_surrogates(char *p, size_t n) {
@@ -1073,13 +1082,13 @@ void scr_wtf8_replace_surrogates(char *p, size_t n) {
 }
 
 const char *scr_str_utf8_copy(const ScrStr *s, char **owned) {
-  const char *hit = scr_wtf8_find_surrogate(s->data, s->len);
-  if (!hit) return s->data;
-  char *copy = malloc(s->len + 1);
+  const char *hit = scr_wtf8_find_surrogate(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  if (!hit) return scr_str_flat_view(s)->data;
+  char *copy = malloc(scr_str_flat_view(s)->len + 1);
   if (!copy) scr_oom();
-  memcpy(copy, s->data, s->len + 1);
-  size_t at = (size_t)(hit - s->data);
-  scr_wtf8_replace_surrogates(copy + at, s->len - at);
+  memcpy(copy, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len + 1);
+  size_t at = (size_t)(hit - scr_str_flat_view(s)->data);
+  scr_wtf8_replace_surrogates(copy + at, scr_str_flat_view(s)->len - at);
   *owned = copy;
   return copy;
 }
@@ -1173,7 +1182,7 @@ static bool scr_sidx_add_point(ScrSidx *e, size_t cu, size_t cb,
  * better trade than repeatedly walking a short string. If a completed
  * ASCII scan later proves identity mapping, all of this storage is freed. */
 static bool scr_sidx_prepare_points(const ScrStr *s, ScrSidx *e) {
-  if (s->len < SCR_SIDX_MIN_BYTES || e->no_more_points) return false;
+  if (scr_str_flat_view(s)->len < SCR_SIDX_MIN_BYTES || e->no_more_points) return false;
   if (e->npoints == 0) {
     if (!scr_sidx_add_point(e, 0, 0, true)) return false;
     /* concat may have left an exact old end/frontier without a previous
@@ -1204,10 +1213,10 @@ static bool scr_sidx_prepare_points(const ScrStr *s, ScrSidx *e) {
 
 /* The first code-point boundary at or after cb + SCR_SIDX_STRIDE_BYTES. */
 static size_t scr_sidx_next_boundary(const ScrStr *s, size_t cb) {
-  size_t remain = s->len - cb;
+  size_t remain = scr_str_flat_view(s)->len - cb;
   size_t end = cb + (remain < SCR_SIDX_STRIDE_BYTES
                          ? remain : SCR_SIDX_STRIDE_BYTES);
-  while (end < s->len && ((unsigned char)s->data[end] & 0xC0) == 0x80) end++;
+  while (end < scr_str_flat_view(s)->len && ((unsigned char)scr_str_flat_view(s)->data[end] & 0xC0) == 0x80) end++;
   return end;
 }
 
@@ -1215,10 +1224,10 @@ static size_t scr_sidx_next_boundary(const ScrStr *s, size_t cb) {
  * retains the old length throughput; the resulting point is always a real
  * UTF-8 character boundary. */
 static bool scr_sidx_extend_one(const ScrStr *s, ScrSidx *e) {
-  if (e->indexed_cb == s->len) return false;
+  if (e->indexed_cb == scr_str_flat_view(s)->len) return false;
   size_t end = scr_sidx_next_boundary(s, e->indexed_cb);
   bool ascii;
-  size_t units = scr_utf16_units_span(s->data + e->indexed_cb,
+  size_t units = scr_utf16_units_span(scr_str_flat_view(s)->data + e->indexed_cb,
                                       end - e->indexed_cb, &ascii);
   /* Defer metadata until a large string proves it needs UTF-8 navigation.
    * A long ASCII prefix is already an exact identity map; when this is the
@@ -1245,7 +1254,7 @@ static bool scr_sidx_extend_one(const ScrStr *s, ScrSidx *e) {
  * with only the hot cursor. This is still fail-open: an allocation failure
  * leaves the completed length/cursor cache fully usable. */
 static void scr_sidx_rebuild_points(const ScrStr *s, ScrSidx *e) {
-  if (s->len < SCR_SIDX_MIN_BYTES || e->points_complete ||
+  if (scr_str_flat_view(s)->len < SCR_SIDX_MIN_BYTES || e->points_complete ||
       e->no_more_points)
     return;
   free(e->points);
@@ -1254,9 +1263,9 @@ static void scr_sidx_rebuild_points(const ScrStr *s, ScrSidx *e) {
   e->cap = 0;
   size_t cu = 0, cb = 0;
   if (!scr_sidx_add_point(e, cu, cb, true)) return;
-  while (cb < s->len) {
+  while (cb < scr_str_flat_view(s)->len) {
     size_t end = scr_sidx_next_boundary(s, cb);
-    cu += scr_utf16_units_span(s->data + cb, end - cb, NULL);
+    cu += scr_utf16_units_span(scr_str_flat_view(s)->data + cb, end - cb, NULL);
     cb = end;
     if (!scr_sidx_add_point(e, cu, cb, true)) return;
   }
@@ -1269,10 +1278,10 @@ static void scr_sidx_rebuild_points(const ScrStr *s, ScrSidx *e) {
  * purge). Callers re-check the header bit before touching the entry again.
  * Immortal strings cannot record the bit and keep the entry. */
 static void scr_sidx_finish(const ScrStr *s, ScrSidx *e) {
-  if (e->indexed_cb != s->len) return;
+  if (e->indexed_cb != scr_str_flat_view(s)->len) return;
   e->u16len = e->indexed_cu;
   scr_str_length_cache_set((ScrStr *)s, (uint32_t)e->u16len);
-  if (e->u16len == s->len) { /* proven all ASCII: identity needs no index */
+  if (e->u16len == scr_str_flat_view(s)->len) { /* proven all ASCII: identity needs no index */
     if (s->rc != SIZE_MAX) {
       ((ScrStr *)s)->ascii = 1;
       bool sparse = (uintptr_t)e - (uintptr_t)scr_sidx_sparse_tab < sizeof scr_sidx_sparse_tab;
@@ -1294,7 +1303,7 @@ static void scr_sidx_finish(const ScrStr *s, ScrSidx *e) {
  * before an anchor and the next distant lookup both reuse the same work. */
 static void scr_sidx_extend_to_u16(const ScrStr *s, ScrSidx *e, size_t u16) {
   if (u16 <= e->indexed_cu) return;
-  while (e->indexed_cb < s->len) {
+  while (e->indexed_cb < scr_str_flat_view(s)->len) {
     size_t start_cu = e->indexed_cu;
     scr_sidx_extend_one(s, e);
     if (u16 <= e->indexed_cu || e->indexed_cu == start_cu) break;
@@ -1322,21 +1331,21 @@ static void scr_sidx_materialize_identity_prefix(const ScrStr *s, ScrSidx *e) {
  * historical single word-wise scan. `u16len == byte len` proves ASCII and
  * restores identity mapping with zero retained checkpoint memory. */
 static size_t scr_sidx_len(const ScrStr *s, ScrSidx *e) {
-  if (s->ascii) return s->len;
+  if (s->ascii) return scr_str_flat_view(s)->len;
   if (e->u16len != SCR_U16_UNKNOWN) return e->u16len;
   uint32_t cached = scr_str_length_cache_get(s);
   if (cached != UINT32_MAX) return e->u16len = cached;
-  while (e->indexed_cb < s->len) scr_sidx_extend_one(s, e);
+  while (e->indexed_cb < scr_str_flat_view(s)->len) scr_sidx_extend_one(s, e);
   scr_sidx_finish(s, e);
-  return s->ascii ? s->len : e->u16len;
+  return s->ascii ? scr_str_flat_view(s)->len : e->u16len;
 }
 
 /* Step the cursor back one char (cb must be > 0 and on a boundary). */
 static void scr_sidx_back(const ScrStr *s, size_t *cu, size_t *cb) {
   SCR_SIDX_STEP();
   size_t p = *cb - 1;
-  while (p > 0 && ((unsigned char)s->data[p] & 0xC0) == 0x80) p--;
-  *cu -= scr_utf8_seq_len((unsigned char)s->data[p]) == 4 ? 2 : 1;
+  while (p > 0 && ((unsigned char)scr_str_flat_view(s)->data[p] & 0xC0) == 0x80) p--;
+  *cu -= scr_utf8_seq_len((unsigned char)scr_str_flat_view(s)->data[p]) == 4 ? 2 : 1;
   *cb = p;
 }
 
@@ -1351,7 +1360,7 @@ static ScrSidxPoint scr_sidx_near_u16(const ScrStr *s, const ScrSidx *e,
                                       size_t u16) {
   /* A nearby cursor already bounds the walk. Searching the complete index
    * first would make each sequential read depend on the receiver's size. */
-  if (e->cb <= s->len && scr_sidx_abs_diff(e->cu, u16) <= 16)
+  if (e->cb <= scr_str_flat_view(s)->len && scr_sidx_abs_diff(e->cu, u16) <= 16)
     return (ScrSidxPoint){e->cu, e->cb};
   ScrSidxPoint best = {0, 0};
   size_t best_dist = u16;
@@ -1374,20 +1383,20 @@ static ScrSidxPoint scr_sidx_near_u16(const ScrStr *s, const ScrSidx *e,
       best_dist = scr_sidx_abs_diff(best.cu, u16);
     }
   }
-  if (e->cb <= s->len && scr_sidx_abs_diff(e->cu, u16) < best_dist) {
+  if (e->cb <= scr_str_flat_view(s)->len && scr_sidx_abs_diff(e->cu, u16) < best_dist) {
     best = (ScrSidxPoint){e->cu, e->cb};
     best_dist = scr_sidx_abs_diff(best.cu, u16);
   }
   if (e->u16len != SCR_U16_UNKNOWN &&
       scr_sidx_abs_diff(e->u16len, u16) < best_dist) {
-    best = (ScrSidxPoint){e->u16len, s->len};
+    best = (ScrSidxPoint){e->u16len, scr_str_flat_view(s)->len};
   }
   return best;
 }
 
 static ScrSidxPoint scr_sidx_near_byte(const ScrStr *s, const ScrSidx *e,
                                        size_t byte_off) {
-  if (e->cb <= s->len && scr_sidx_abs_diff(e->cb, byte_off) <= 16)
+  if (e->cb <= scr_str_flat_view(s)->len && scr_sidx_abs_diff(e->cb, byte_off) <= 16)
     return (ScrSidxPoint){e->cu, e->cb};
   ScrSidxPoint best = {0, 0};
   size_t best_dist = byte_off;
@@ -1410,13 +1419,13 @@ static ScrSidxPoint scr_sidx_near_byte(const ScrStr *s, const ScrSidx *e,
       best_dist = scr_sidx_abs_diff(best.cb, byte_off);
     }
   }
-  if (e->cb <= s->len && scr_sidx_abs_diff(e->cb, byte_off) < best_dist) {
+  if (e->cb <= scr_str_flat_view(s)->len && scr_sidx_abs_diff(e->cb, byte_off) < best_dist) {
     best = (ScrSidxPoint){e->cu, e->cb};
     best_dist = scr_sidx_abs_diff(best.cb, byte_off);
   }
   if (e->u16len != SCR_U16_UNKNOWN &&
-      scr_sidx_abs_diff(s->len, byte_off) < best_dist) {
-    best = (ScrSidxPoint){e->u16len, s->len};
+      scr_sidx_abs_diff(scr_str_flat_view(s)->len, byte_off) < best_dist) {
+    best = (ScrSidxPoint){e->u16len, scr_str_flat_view(s)->len};
   }
   return best;
 }
@@ -1432,20 +1441,20 @@ static void scr_sidx_ascii_run(const ScrStr *s, ScrSidx *e) {
   size_t lower = start < 128 ? 0 : start - 128;
   while (start - lower >= 8) {
     uint64_t word;
-    memcpy(&word, s->data + start - 8, 8);
+    memcpy(&word, scr_str_flat_view(s)->data + start - 8, 8);
     if (word & UINT64_C(0x8080808080808080)) break;
     start -= 8;
   }
-  while (start > lower && (unsigned char)s->data[start - 1] < 0x80) start--;
-  size_t remaining = s->len - end;
+  while (start > lower && (unsigned char)scr_str_flat_view(s)->data[start - 1] < 0x80) start--;
+  size_t remaining = scr_str_flat_view(s)->len - end;
   size_t limit = end + (remaining < 128 ? remaining : 128);
   while (limit - end >= 8) {
     uint64_t word;
-    memcpy(&word, s->data + end, 8);
+    memcpy(&word, scr_str_flat_view(s)->data + end, 8);
     if (word & UINT64_C(0x8080808080808080)) break;
     end += 8;
   }
-  while (end < limit && (unsigned char)s->data[end] < 0x80) end++;
+  while (end < limit && (unsigned char)scr_str_flat_view(s)->data[end] < 0x80) end++;
   e->ascii_cu = e->cu - (e->cb - start);
   e->ascii_cb = start;
   e->ascii_end = end;
@@ -1465,15 +1474,15 @@ static void scr_sidx_ascii_run(const ScrStr *s, ScrSidx *e) {
  * SCR_SIDX_ASCII_REACH past the run try: the walk below bounds the rest. */
 static bool scr_sidx_ascii_grow(const ScrStr *s, ScrSidx *e, size_t want) {
   size_t end = e->ascii_end;
-  if (want < end || want >= s->len || want - end > SCR_SIDX_ASCII_REACH) return false;
-  size_t limit = s->len - want > SCR_SIDX_ASCII_AHEAD ? want + SCR_SIDX_ASCII_AHEAD : s->len;
+  if (want < end || want >= scr_str_flat_view(s)->len || want - end > SCR_SIDX_ASCII_REACH) return false;
+  size_t limit = scr_str_flat_view(s)->len - want > SCR_SIDX_ASCII_AHEAD ? want + SCR_SIDX_ASCII_AHEAD : scr_str_flat_view(s)->len;
   while (limit - end >= 8) {
     uint64_t word;
-    memcpy(&word, s->data + end, 8);
+    memcpy(&word, scr_str_flat_view(s)->data + end, 8);
     if (word & UINT64_C(0x8080808080808080)) break;
     end += 8;
   }
-  while (end < limit && (unsigned char)s->data[end] < 0x80) end++;
+  while (end < limit && (unsigned char)scr_str_flat_view(s)->data[end] < 0x80) end++;
   e->ascii_end = end;
   return want < end;
 }
@@ -1489,9 +1498,9 @@ static size_t scr_u16_to_byte_walk(const ScrStr *s, ScrSidx *e, size_t u16,
  * inline into callers; everything else is out of line. */
 static inline size_t scr_u16_to_byte_c(const ScrStr *s, ScrSidx *e, size_t u16,
                                         bool *mid) {
-  if (s->ascii || e->u16len == s->len) { /* all ASCII: identity mapping */
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) { /* all ASCII: identity mapping */
     *mid = false;
-    return u16 < s->len ? u16 : s->len;
+    return u16 < scr_str_flat_view(s)->len ? u16 : scr_str_flat_view(s)->len;
   }
   if (u16 >= e->ascii_cu && u16 - e->ascii_cu < e->ascii_end - e->ascii_cb) {
     e->cb = e->ascii_cb + (u16 - e->ascii_cu);
@@ -1509,9 +1518,9 @@ static __attribute__((noinline)) size_t scr_u16_to_byte_walk(const ScrStr *s, Sc
   if (u16 >= e->cu && u16 - e->cu <= 8) {
     size_t cu = e->cu, cb = e->cb;
     bool m = false;
-    while (cu < u16 && cb < s->len) {
+    while (cu < u16 && cb < scr_str_flat_view(s)->len) {
       SCR_SIDX_STEP();
-      size_t seq = scr_utf8_seq_len((unsigned char)s->data[cb]);
+      size_t seq = scr_utf8_seq_len((unsigned char)scr_str_flat_view(s)->data[cb]);
       size_t w = seq == 4 ? 2 : 1;
       if (cu + w > u16) { /* u16 lands between the halves of an astral char */
         m = true;
@@ -1523,7 +1532,7 @@ static __attribute__((noinline)) size_t scr_u16_to_byte_walk(const ScrStr *s, Sc
     if (cu == u16 || m) {
       e->cu = cu;
       e->cb = cb;
-      if (cb < s->len && (unsigned char)s->data[cb] < 0x80) scr_sidx_ascii_run(s, e);
+      if (cb < scr_str_flat_view(s)->len && (unsigned char)scr_str_flat_view(s)->data[cb] < 0x80) scr_sidx_ascii_run(s, e);
       *mid = m;
       return cb;
     }
@@ -1537,9 +1546,9 @@ static __attribute__((noinline)) size_t scr_u16_to_byte_walk(const ScrStr *s, Sc
   scr_sidx_extend_to_u16(s, e, u16);
   /* Extending a far-end lookup can just have proved identity. Do not
    * materialize an index that the identity fast path will never consult. */
-  if (s->ascii || e->u16len == s->len) {
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) {
     *mid = false;
-    return u16 < s->len ? u16 : s->len;
+    return u16 < scr_str_flat_view(s)->len ? u16 : scr_str_flat_view(s)->len;
   }
   scr_sidx_materialize_identity_prefix(s, e);
   ScrSidxPoint near = scr_sidx_near_u16(s, e, u16);
@@ -1551,26 +1560,26 @@ static __attribute__((noinline)) size_t scr_u16_to_byte_walk(const ScrStr *s, Sc
      * a target at least nine units away. */
     if (cu - u16 >= 9 && cb >= 8) {
       size_t start = cb - 8;
-      while (start > 0 && ((unsigned char)s->data[start] & 0xC0) == 0x80)
+      while (start > 0 && ((unsigned char)scr_str_flat_view(s)->data[start] & 0xC0) == 0x80)
         start--;
-      cu -= scr_utf16_units_span(s->data + start, cb - start, NULL);
+      cu -= scr_utf16_units_span(scr_str_flat_view(s)->data + start, cb - start, NULL);
       cb = start;
     } else {
       scr_sidx_back(s, &cu, &cb);
     }
   }
   bool m = false;
-  while (cu < u16 && cb < s->len) {
-    if (u16 - cu >= 9 && s->len - cb >= 8) {
+  while (cu < u16 && cb < scr_str_flat_view(s)->len) {
+    if (u16 - cu >= 9 && scr_str_flat_view(s)->len - cb >= 8) {
       size_t end = cb + 8;
-      while (end < s->len && ((unsigned char)s->data[end] & 0xC0) == 0x80)
+      while (end < scr_str_flat_view(s)->len && ((unsigned char)scr_str_flat_view(s)->data[end] & 0xC0) == 0x80)
         end++;
-      cu += scr_utf16_units_span(s->data + cb, end - cb, NULL);
+      cu += scr_utf16_units_span(scr_str_flat_view(s)->data + cb, end - cb, NULL);
       cb = end;
       continue;
     }
     SCR_SIDX_STEP();
-    size_t seq = scr_utf8_seq_len((unsigned char)s->data[cb]);
+    size_t seq = scr_utf8_seq_len((unsigned char)scr_str_flat_view(s)->data[cb]);
     size_t w = seq == 4 ? 2 : 1;
     if (cu + w > u16) { /* u16 lands between the halves of an astral char */
       m = true;
@@ -1581,7 +1590,7 @@ static __attribute__((noinline)) size_t scr_u16_to_byte_walk(const ScrStr *s, Sc
   }
   e->cu = cu;
   e->cb = cb;
-  if (cb < s->len && (unsigned char)s->data[cb] < 0x80)
+  if (cb < scr_str_flat_view(s)->len && (unsigned char)scr_str_flat_view(s)->data[cb] < 0x80)
     scr_sidx_ascii_run(s, e);
   *mid = m;
   return cb;
@@ -1594,7 +1603,7 @@ static size_t scr_byte_to_u16_walk(const ScrStr *s, ScrSidx *e, size_t byte_off)
  * ASCII-run cases inline into callers. */
 static inline size_t scr_byte_to_u16_c(const ScrStr *s, ScrSidx *e,
                                         size_t byte_off) {
-  if (s->ascii || e->u16len == s->len) return byte_off; /* all ASCII */
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) return byte_off; /* all ASCII */
   if (byte_off >= e->ascii_cb && byte_off < e->ascii_end) {
     e->cu = e->ascii_cu + (byte_off - e->ascii_cb);
     e->cb = byte_off;
@@ -1618,20 +1627,20 @@ static __attribute__((noinline)) size_t scr_byte_to_u16_walk(const ScrStr *s, Sc
   }
   /* As above, a completed all-ASCII scan is its own index. In particular,
    * do not rebuild points that scr_sidx_finish() deliberately discarded. */
-  if (s->ascii || e->u16len == s->len) return byte_off;
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) return byte_off;
   scr_sidx_materialize_identity_prefix(s, e);
   ScrSidxPoint near = scr_sidx_near_byte(s, e, byte_off);
   size_t cu = near.cu, cb = near.cb;
   /* Unlike unit-to-byte conversion, both endpoints are already exact byte
    * boundaries. Count the whole span with the shared word-wise classifier. */
   if (cb > byte_off)
-    cu -= scr_utf16_units_span(s->data + byte_off, cb - byte_off, NULL);
+    cu -= scr_utf16_units_span(scr_str_flat_view(s)->data + byte_off, cb - byte_off, NULL);
   else
-    cu += scr_utf16_units_span(s->data + cb, byte_off - cb, NULL);
+    cu += scr_utf16_units_span(scr_str_flat_view(s)->data + cb, byte_off - cb, NULL);
   cb = byte_off;
   e->cu = cu;
   e->cb = cb;
-  if (cb < s->len && (unsigned char)s->data[cb] < 0x80)
+  if (cb < scr_str_flat_view(s)->len && (unsigned char)scr_str_flat_view(s)->data[cb] < 0x80)
     scr_sidx_ascii_run(s, e);
   return cu;
 }
@@ -1707,21 +1716,21 @@ static const char *scr_byte_find(const char *hay, size_t hay_len,
  * UTF-16 copies of both strings; every other needle never gets here. */
 static inline bool scr_needle_halves_pairs(const ScrStr *n) {
   return __builtin_expect(
-      scr_wtf8_any() && !n->ascii && n->len >= 3 &&
-          (((unsigned char)n->data[0] == 0xED && (unsigned char)n->data[1] >= 0xB0) ||
-           ((unsigned char)n->data[n->len - 3] == 0xED &&
-            ((unsigned char)n->data[n->len - 2] & 0xF0) == 0xA0)),
+      scr_wtf8_any() && !n->ascii && scr_str_flat_view(n)->len >= 3 &&
+          (((unsigned char)scr_str_flat_view(n)->data[0] == 0xED && (unsigned char)scr_str_flat_view(n)->data[1] >= 0xB0) ||
+           ((unsigned char)scr_str_flat_view(n)->data[scr_str_flat_view(n)->len - 3] == 0xED &&
+            ((unsigned char)scr_str_flat_view(n)->data[scr_str_flat_view(n)->len - 2] & 0xF0) == 0xA0)),
       0);
 }
 
 /* The UTF-16 code units of s (malloc'd); *n gets their count. */
 static uint16_t *scr_str_units(const ScrStr *s, size_t *n) {
-  uint16_t *u = malloc((s->len + 1) * sizeof *u); /* units <= bytes */
+  uint16_t *u = malloc((scr_str_flat_view(s)->len + 1) * sizeof *u); /* units <= bytes */
   if (!u) scr_oom();
   size_t k = 0;
-  for (size_t i = 0; i < s->len;) {
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
     size_t adv;
-    uint32_t cp = scr_utf8_decode(s->data + i, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + i, &adv);
     i += adv;
     if (cp >= 0x10000) {
       u[k++] = (uint16_t)scr_cp_high(cp);
@@ -1743,7 +1752,7 @@ static uint16_t *scr_str_units(const ScrStr *s, size_t *n) {
 #define SCR_SIDX_UNITS_MAX ((size_t)1 << 20)
 static bool scr_sidx_units(const ScrStr *s, ScrSidx *e) {
   if (!e->units) {
-    if (++e->reads < 32 || e->reads * 16 < s->len || s->len > SCR_SIDX_UNITS_MAX) return false;
+    if (++e->reads < 32 || e->reads * 16 < scr_str_flat_view(s)->len || scr_str_flat_view(s)->len > SCR_SIDX_UNITS_MAX) return false;
     e->units = scr_str_units(s, &e->nunits);
   }
   /* Publish the scan's receiver for emitted reads (scr_runtime.h). */
@@ -1794,19 +1803,20 @@ static __attribute__((noinline)) double scr_str_unit_search(const ScrStr *s, con
 /* Search backwards from a clamped UTF-16 position. A low-surrogate position
  * maps to its scalar's first byte, so that scalar remains searchable. */
 double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double position) {
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_find(s, needle, position, true);
   ScrSidx *e = scr_sidx_for(s);
   size_t len16 = scr_sidx_len(s, e);
   size_t start16 = isnan(position) || position >= (double)len16 ? len16
                    : position <= 0 ? 0 : (size_t)trunc(position);
-  if (needle->len == 0) return (double)start16;
-  if (needle->len > s->len) return -1.0;
+  if (scr_str_flat_view(needle)->len == 0) return (double)start16;
+  if (scr_str_flat_view(needle)->len > scr_str_flat_view(s)->len) return -1.0;
   if (scr_needle_halves_pairs(needle)) return scr_str_unit_search(s, needle, start16, SCR_UNIT_LAST);
   bool mid;
   size_t start_byte = scr_u16_to_byte_c(s, e, start16, &mid);
-  size_t max_start = s->len - needle->len;
+  size_t max_start = scr_str_flat_view(s)->len - scr_str_flat_view(needle)->len;
   if (start_byte < max_start) max_start = start_byte;
   for (size_t i = max_start + 1; i-- > 0;) {
-    if (memcmp(s->data + i, needle->data, needle->len) == 0) {
+    if (memcmp(scr_str_flat_view(s)->data + i, scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len) == 0) {
       return (double)scr_byte_to_u16_c(s, e, i);
     }
   }
@@ -1818,6 +1828,7 @@ double scr_str_last_index_of(ScrStr *s, ScrStr *needle) {
 }
 
 double scr_str_utf16_len(ScrStr *s) {
+  if (scr_proto_is(s)) return (double)s->len; /* native UTF-16 length */
   if (s->ascii) return (double)s->len;
   /* A short receiver is counted directly: claiming an index entry for it
    * would evict the cursor of a long receiver being scanned meanwhile. */
@@ -1831,6 +1842,7 @@ double scr_str_utf16_len(ScrStr *s) {
 }
 
 double scr_str_char_code_at(ScrStr *s, double i) {
+  if (scr_proto_is(s)) return scr_proto_char_code_at(s, i);
   /* A sequential scan of a non-ASCII receiver stays inside the bounded
    * ASCII span cached at its last resolved position. Its unit offset is an
    * integer, so trunc(i) - ascii_cu == trunc(i - ascii_cu) for i at or past
@@ -1844,21 +1856,21 @@ double scr_str_char_code_at(ScrStr *s, double i) {
     if (k >= last->ascii_cu && k - last->ascii_cu < last->ascii_end - last->ascii_cb) {
       last->cu = k;
       last->cb = last->ascii_cb + (k - last->ascii_cu);
-      return (double)(unsigned char)s->data[last->cb];
+      return (double)(unsigned char)scr_str_flat_view(s)->data[last->cb];
     }
     /* The unit right after the hot cursor's (a sequential scan through
      * non-ASCII text): the low half of an astral character at the cursor,
      * or the unit that starts the next character. */
-    if (k == last->cu + 1 && last->cb < s->len) {
-      size_t adv, seq = scr_utf8_seq_len((unsigned char)s->data[last->cb]);
-      if (seq == 4) return (double)scr_cp_low(scr_utf8_decode(s->data + last->cb, &adv));
+    if (k == last->cu + 1 && last->cb < scr_str_flat_view(s)->len) {
+      size_t adv, seq = scr_utf8_seq_len((unsigned char)scr_str_flat_view(s)->data[last->cb]);
+      if (seq == 4) return (double)scr_cp_low(scr_utf8_decode(scr_str_flat_view(s)->data + last->cb, &adv));
       size_t cb = last->cb + seq;
-      if (cb < s->len) {
+      if (cb < scr_str_flat_view(s)->len) {
         last->cu++;
         last->cb = cb;
-        unsigned char c = (unsigned char)s->data[cb];
+        unsigned char c = (unsigned char)scr_str_flat_view(s)->data[cb];
         if (c < 0x80) return (double)c;
-        uint32_t cp = scr_utf8_decode(s->data + cb, &adv);
+        uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + cb, &adv);
         return (double)(cp < 0x10000 ? cp : scr_cp_high(cp));
       }
     }
@@ -1866,34 +1878,35 @@ double scr_str_char_code_at(ScrStr *s, double i) {
   double idx = scr_to_integer_or_infinity(i);
   if (!(idx >= 0)) return NAN; /* negative or -Infinity */
   /* UTF-16 length <= byte length always, so this also fences the cast. */
-  if (idx >= (double)s->len) return NAN;
-  if (s->ascii) return (double)(unsigned char)s->data[(size_t)idx];
+  if (idx >= (double)scr_str_flat_view(s)->len) return NAN;
+  if (s->ascii) return (double)(unsigned char)scr_str_flat_view(s)->data[(size_t)idx];
   ScrSidx *e = scr_sidx(s);
-  if (s->ascii || e->u16len == s->len) return (double)(unsigned char)s->data[(size_t)idx];
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) return (double)(unsigned char)scr_str_flat_view(s)->data[(size_t)idx];
   if (scr_sidx_units(s, e)) return idx < (double)e->nunits ? (double)e->units[(size_t)idx] : NAN;
   bool mid;
   size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
-  if (off >= s->len) return NAN; /* idx >= length */
+  if (off >= scr_str_flat_view(s)->len) return NAN; /* idx >= length */
   size_t adv;
-  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + off, &adv);
   if (cp < 0x10000) return (double)cp;
   uint32_t v = cp - 0x10000;
   return mid ? (double)(0xDC00 + (v & 0x3FF)) : (double)(0xD800 + (v >> 10));
 }
 
 double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex) {
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_find(s, needle, fromIndex, false);
   double pos = scr_to_integer_or_infinity(fromIndex);
-  if (needle->len > s->len) return -1.0;
+  if (scr_str_flat_view(needle)->len > scr_str_flat_view(s)->len) return -1.0;
   ScrSidx *e = scr_sidx_for(s);
   /* Per spec, the empty needle is found at the clamped fromIndex itself —
    * even when that index is between the halves of an astral pair. */
-  if (needle->len == 0) {
+  if (scr_str_flat_view(needle)->len == 0) {
     size_t len16 = scr_sidx_len(s, e);
     return pos <= 0 ? 0 : pos >= (double)len16 ? (double)len16 : pos;
   }
   /* Byte length bounds UTF-16 length and fences the cast. Let the mapper
    * extend only as far as needed instead of indexing an unsearched suffix. */
-  if (pos >= (double)s->len) return -1.0;
+  if (pos >= (double)scr_str_flat_view(s)->len) return -1.0;
   size_t start16 = pos <= 0 ? 0 : (size_t)pos;
   if (scr_needle_halves_pairs(needle)) {
     size_t len16 = scr_sidx_len(s, e);
@@ -1905,10 +1918,10 @@ double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex) {
    * resume at the next char boundary. */
   if (mid) start_b += 4;
   const char *found =
-      scr_byte_find(s->data + start_b, s->len - start_b, needle->data,
-                     needle->len);
+      scr_byte_find(scr_str_flat_view(s)->data + start_b, scr_str_flat_view(s)->len - start_b, scr_str_flat_view(needle)->data,
+                     scr_str_flat_view(needle)->len);
   if (!found) return -1.0;
-  return (double)scr_byte_to_u16_c(s, e, (size_t)(found - s->data));
+  return (double)scr_byte_to_u16_c(s, e, (size_t)(found - scr_str_flat_view(s)->data));
 }
 
 static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
@@ -1917,6 +1930,7 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
 /* Normalize once, then share slice's extraction without another cache
  * lookup, length query or floating-point boundary conversion. */
 ScrStr *scr_str_substring(ScrStr *s, double start, double end) {
+  if (scr_proto_is(s)) return scr_proto_slice(s, start, end, true);
   ScrSidx *e = scr_sidx_for(s);
   double len16 = (double)scr_sidx_len(s, e);
   double a = scr_to_integer_or_infinity(start);
@@ -1928,7 +1942,8 @@ ScrStr *scr_str_substring(ScrStr *s, double start, double end) {
 }
 
 bool scr_str_includes(ScrStr *s, ScrStr *needle) {
-  if (scr_byte_find(s->data, s->len, needle->data, needle->len)) return true;
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_find(s, needle, 0, false) >= 0;
+  if (scr_byte_find(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len)) return true;
   return scr_needle_halves_pairs(needle) &&
          scr_str_unit_search(s, needle, 0, SCR_UNIT_FIRST) >= 0;
 }
@@ -1936,13 +1951,15 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle) {
 /* A needle ending in a lone high surrogate can match the first half of a
  * receiver pair (and one starting with a lone low surrogate the second). */
 bool scr_str_starts_with(ScrStr *s, ScrStr *needle) {
-  if (needle->len <= s->len && memcmp(s->data, needle->data, needle->len) == 0) return true;
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_affix(s, needle, 0, false);
+  if (scr_str_flat_view(needle)->len <= scr_str_flat_view(s)->len && memcmp(scr_str_flat_view(s)->data, scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len) == 0) return true;
   return scr_needle_halves_pairs(needle) && scr_str_unit_search(s, needle, 0, SCR_UNIT_AT) >= 0;
 }
 
 bool scr_str_ends_with(ScrStr *s, ScrStr *needle) {
-  if (needle->len <= s->len &&
-      memcmp(s->data + (s->len - needle->len), needle->data, needle->len) == 0)
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_affix(s, needle, INFINITY, true);
+  if (scr_str_flat_view(needle)->len <= scr_str_flat_view(s)->len &&
+      memcmp(scr_str_flat_view(s)->data + (scr_str_flat_view(s)->len - scr_str_flat_view(needle)->len), scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len) == 0)
     return true;
   if (!scr_needle_halves_pairs(needle)) return false;
   size_t len16 = scr_sidx_len(s, scr_sidx_for(s));
@@ -1956,10 +1973,11 @@ static size_t scr_str_clamp_u16_position(double position, size_t len16) {
 }
 
 bool scr_str_starts_with_from(ScrStr *s, ScrStr *needle, double position) {
-  if (needle->len == 0) return true;
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_affix(s, needle, position, false);
+  if (scr_str_flat_view(needle)->len == 0) return true;
   double pos = scr_to_integer_or_infinity(position);
   if (pos <= 0) return scr_str_starts_with(s, needle);
-  if (pos >= (double)s->len || needle->len > s->len) return false;
+  if (pos >= (double)scr_str_flat_view(s)->len || scr_str_flat_view(needle)->len > scr_str_flat_view(s)->len) return false;
   ScrSidx *e = scr_sidx_for(s);
   if (scr_needle_halves_pairs(needle)) {
     size_t len16 = scr_sidx_len(s, e);
@@ -1968,14 +1986,15 @@ bool scr_str_starts_with_from(ScrStr *s, ScrStr *needle, double position) {
   }
   bool mid;
   size_t start_byte = scr_u16_to_byte_c(s, e, (size_t)pos, &mid);
-  return !mid && needle->len <= s->len - start_byte &&
-         memcmp(s->data + start_byte, needle->data, needle->len) == 0;
+  return !mid && scr_str_flat_view(needle)->len <= scr_str_flat_view(s)->len - start_byte &&
+         memcmp(scr_str_flat_view(s)->data + start_byte, scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len) == 0;
 }
 
 bool scr_str_ends_with_from(ScrStr *s, ScrStr *needle, double end_position) {
-  if (needle->len == 0) return true;
-  if (needle->len > s->len) return false;
-  if (end_position >= (double)s->len) return scr_str_ends_with(s, needle);
+  if (scr_proto_is(s) || scr_proto_is(needle)) return scr_proto_affix(s, needle, end_position, true);
+  if (scr_str_flat_view(needle)->len == 0) return true;
+  if (scr_str_flat_view(needle)->len > scr_str_flat_view(s)->len) return false;
+  if (end_position >= (double)scr_str_flat_view(s)->len) return scr_str_ends_with(s, needle);
   /* A second receiver lookup can evict the first receiver's entry. Resolve
    * the needle before borrowing the haystack entry for both conversions. */
   size_t needle16 = scr_sidx_len(needle, scr_sidx_for(needle));
@@ -1988,8 +2007,8 @@ bool scr_str_ends_with_from(ScrStr *s, ScrStr *needle, double end_position) {
   bool start_mid, end_mid;
   size_t start_byte = scr_u16_to_byte_c(s, e, end16 - needle16, &start_mid);
   size_t end_byte = scr_u16_to_byte_c(s, e, end16, &end_mid);
-  return !start_mid && !end_mid && end_byte - start_byte == needle->len &&
-         memcmp(s->data + start_byte, needle->data, needle->len) == 0;
+  return !start_mid && !end_mid && end_byte - start_byte == scr_str_flat_view(needle)->len &&
+         memcmp(scr_str_flat_view(s)->data + start_byte, scr_str_flat_view(needle)->data, scr_str_flat_view(needle)->len) == 0;
 }
 
 /* Resolve one slice() boundary: negatives are relative to the end, then
@@ -2004,6 +2023,7 @@ static size_t scr_slice_boundary(double v, size_t len16) {
 }
 
 ScrStr *scr_str_slice(ScrStr *s, double start, double end) {
+  if (scr_proto_is(s)) return scr_proto_slice(s, start, end, false);
   ScrSidx *e = scr_sidx_for(s);
   size_t len16 = scr_sidx_len(s, e);
   size_t from = scr_slice_boundary(scr_to_integer_or_infinity(start), len16);
@@ -2036,6 +2056,8 @@ static void scr_str_slice_bounds(ScrStr *s, ScrSidx *e, double start, double end
 
 void scr_str_slice_range(ScrStr *s, double start, double end, bool substring,
                          ScrStringSlice *out) {
+  /* This descriptor is consumed by byte-oriented callers. */
+  s = scr_str_flat_view(s);
   ScrSidx *e = scr_sidx_for(s);
   size_t from, to;
   scr_str_slice_bounds(s, e, start, end, substring, &from, &to);
@@ -2066,6 +2088,7 @@ static inline ScrStr *scr_str_scratch_fill(ScrStr *scratch, const char *data, si
 
 ScrStr *scr_str_slice_scratch(ScrStr *s, double start, double end, bool substring,
                               ScrStr *scratch, size_t bytes) {
+  s = scr_str_flat_view(s);
   size_t capacity = bytes - sizeof(ScrStr) - 1;
   if (__builtin_expect(s->ascii, 1)) {
     /* Units are bytes: no index entry, and the bounds are byte offsets. */
@@ -2113,8 +2136,8 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
   if (from >= to) return scr_str_empty();
   if (s->ascii) {
     /* Identity mapping; callers clamp both bounds to the length. */
-    if (from == 0 && to == s->len) return scr_str_retain(s);
-    return scr_str_from_span_ascii(s->data + from, to - from);
+    if (from == 0 && to == scr_str_flat_view(s)->len) return scr_str_retain(s);
+    return scr_str_from_span_ascii(scr_str_flat_view(s)->data + from, to - from);
   }
   if (from == 0 && to == e->u16len) return scr_str_retain(s);
 
@@ -2127,7 +2150,7 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
   size_t content_len = to_b - content_b;
 
   if (!from_mid && !to_mid) {
-    ScrStr *result = scr_str_from_span(s->data + from_b, content_len);
+    ScrStr *result = scr_str_from_span(scr_str_flat_view(s)->data + from_b, content_len);
     /* Unit boundaries prove the output length, even below the sparse-index
      * threshold. Keep it with the allocation so arrays of slices retain it
      * after eviction; navigation checkpoints remain lazy and bounded. */
@@ -2140,11 +2163,11 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
   size_t total = content_len + (from_mid ? 3 : 0) + (to_mid ? 3 : 0);
   ScrStr *r = scr_str_alloc(total, total);
   size_t o = 0, adv;
-  if (from_mid) o += scr_wtf8_put(r->data, scr_cp_low(scr_utf8_decode(s->data + from_b, &adv)));
-  memcpy(r->data + o, s->data + content_b, content_len);
+  if (from_mid) o += scr_wtf8_put(scr_str_flat_view(r)->data, scr_cp_low(scr_utf8_decode(scr_str_flat_view(s)->data + from_b, &adv)));
+  memcpy(scr_str_flat_view(r)->data + o, scr_str_flat_view(s)->data + content_b, content_len);
   o += content_len;
-  if (to_mid) scr_wtf8_put(r->data + o, scr_cp_high(scr_utf8_decode(s->data + to_b, &adv)));
-  r->data[total] = '\0';
+  if (to_mid) scr_wtf8_put(scr_str_flat_view(r)->data + o, scr_cp_high(scr_utf8_decode(scr_str_flat_view(s)->data + to_b, &adv)));
+  scr_str_flat_view(r)->data[total] = '\0';
   r->ascii = 0;
   scr_str_length_cache_set(r, (uint32_t)(to - from));
   return r;
@@ -2163,22 +2186,23 @@ ScrStr *scr_str_repeat(ScrStr *s, double count) {
     scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)len);
     return scr_str_empty();
   }
-  if (n == 0 || s->len == 0) return scr_str_empty();
+  if (n == 0 || scr_str_flat_view(s)->len == 0) return scr_str_empty();
+  if (SCR_QUICKJS_STRINGS && (scr_proto_is(s) || (isfinite(n) && n * scr_str_flat_view(s)->len > 128))) return scr_proto_repeat(s, n);
   /* n is a finite non-negative integer here. Reject sizes malloc could not
    * satisfy anyway before the double→size_t conversion can overflow. */
-  if (n > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / s->len)) scr_oom();
-  size_t total = (size_t)n * s->len;
+  if (n > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / scr_str_flat_view(s)->len)) scr_oom();
+  size_t total = (size_t)n * scr_str_flat_view(s)->len;
   ScrStr *r = scr_str_alloc(total, total);
-  memcpy(r->data, s->data, s->len);
-  size_t filled = s->len;
+  memcpy(scr_str_flat_view(r)->data, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  size_t filled = scr_str_flat_view(s)->len;
   while (filled < total) { /* doubling fill */
     size_t chunk = filled <= total - filled ? filled : total - filled;
-    memcpy(r->data + filled, r->data, chunk);
+    memcpy(scr_str_flat_view(r)->data + filled, scr_str_flat_view(r)->data, chunk);
     filled += chunk;
   }
-  r->data[total] = '\0';
+  scr_str_flat_view(r)->data[total] = '\0';
   r->ascii = s->ascii;
-  if (scr_wtf8_joins(s->data, s->len, s->data, s->len)) scr_str_fuse_surrogates(r);
+  if (scr_wtf8_joins(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len)) scr_str_fuse_surrogates(r);
   return r;
 }
 
@@ -2195,68 +2219,68 @@ static bool scr_is_js_whitespace(uint32_t cp) {
 }
 
 ScrStr *scr_str_trim(ScrStr *s) {
-  size_t b = 0, e = s->len;
+  size_t b = 0, e = scr_str_flat_view(s)->len;
   while (b < e) {
     size_t adv;
-    uint32_t cp = scr_utf8_decode(s->data + b, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + b, &adv);
     if (!scr_is_js_whitespace(cp)) break;
     b += adv;
   }
   while (e > b) {
     size_t cs = e - 1; /* back up to the lead byte of the last char */
-    while (cs > b && ((unsigned char)s->data[cs] & 0xC0) == 0x80) cs--;
+    while (cs > b && ((unsigned char)scr_str_flat_view(s)->data[cs] & 0xC0) == 0x80) cs--;
     size_t adv;
-    uint32_t cp = scr_utf8_decode(s->data + cs, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + cs, &adv);
     if (!scr_is_js_whitespace(cp)) break;
     e = cs;
   }
-  return scr_str_from_span(s->data + b, e - b);
+  return scr_str_from_span(scr_str_flat_view(s)->data + b, e - b);
 }
 
 ScrStr *scr_str_char_at(ScrStr *s, double i) {
   double idx = scr_to_integer_or_infinity(i);
   if (!(idx >= 0)) return scr_str_empty();
-  if (idx >= (double)s->len) return scr_str_empty(); /* len16 <= len */
-  if (s->ascii) return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  if (idx >= (double)scr_str_flat_view(s)->len) return scr_str_empty(); /* len16 <= len */
+  if (s->ascii) return (ScrStr *)&scr_ascii1[(unsigned char)scr_str_flat_view(s)->data[(size_t)idx]];
   ScrSidx *e = scr_sidx(s);
-  if (s->ascii || e->u16len == s->len) { /* all ASCII */
-    return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) { /* all ASCII */
+    return (ScrStr *)&scr_ascii1[(unsigned char)scr_str_flat_view(s)->data[(size_t)idx]];
   }
   if (scr_sidx_units(s, e))
     return idx < (double)e->nunits ? scr_str_from_char_code_one(e->units[(size_t)idx]) : scr_str_empty();
   bool mid;
   size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
-  if (off >= s->len) return scr_str_empty(); /* out of range */
+  if (off >= scr_str_flat_view(s)->len) return scr_str_empty(); /* out of range */
   size_t adv;
-  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + off, &adv);
   if (cp >= 0x10000) return scr_str_from_unit(mid ? scr_cp_low(cp) : scr_cp_high(cp));
-  return scr_str_from_span(s->data + off, adv);
+  return scr_str_from_span(scr_str_flat_view(s)->data + off, adv);
 }
 
 /* trimStart()/trimEnd(): the one-sided halves of trim — same exact JS
  * WhiteSpace ∪ LineTerminator set, same scan loops. */
 ScrStr *scr_str_trim_start(ScrStr *s) {
   size_t b = 0;
-  while (b < s->len) {
+  while (b < scr_str_flat_view(s)->len) {
     size_t adv;
-    uint32_t cp = scr_utf8_decode(s->data + b, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + b, &adv);
     if (!scr_is_js_whitespace(cp)) break;
     b += adv;
   }
-  return scr_str_from_span(s->data + b, s->len - b);
+  return scr_str_from_span(scr_str_flat_view(s)->data + b, scr_str_flat_view(s)->len - b);
 }
 
 ScrStr *scr_str_trim_end(ScrStr *s) {
-  size_t e = s->len;
+  size_t e = scr_str_flat_view(s)->len;
   while (e > 0) {
     size_t cs = e - 1; /* back up to the lead byte of the last char */
-    while (cs > 0 && ((unsigned char)s->data[cs] & 0xC0) == 0x80) cs--;
+    while (cs > 0 && ((unsigned char)scr_str_flat_view(s)->data[cs] & 0xC0) == 0x80) cs--;
     size_t adv;
-    uint32_t cp = scr_utf8_decode(s->data + cs, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + cs, &adv);
     if (!scr_is_js_whitespace(cp)) break;
     e = cs;
   }
-  return scr_str_from_span(s->data, e);
+  return scr_str_from_span(scr_str_flat_view(s)->data, e);
 }
 
 /* Split owns a fresh array and appends only present string values. Fill an
@@ -2278,13 +2302,13 @@ static ScrStr *scr_str_split_piece(const char *bytes, size_t len, ScrStr **scrat
     scr_short_forget(piece);
     scr_str_hash_forget(piece);
     scr_sidx_purge(piece);
-    memcpy(piece->data, bytes, len);
-    piece->len = len;
-    piece->data[len] = '\0';
+    memcpy(scr_str_flat_view(piece)->data, bytes, len);
+    scr_str_flat_view(piece)->len = len;
+    scr_str_flat_view(piece)->data[len] = '\0';
   } else {
     ScrStr *fresh = scr_str_alloc_raw(len, len < 64 ? 64 : len);
-    memcpy(fresh->data, bytes, len);
-    fresh->data[len] = '\0';
+    memcpy(scr_str_flat_view(fresh)->data, bytes, len);
+    scr_str_flat_view(fresh)->data[len] = '\0';
     *scratch = fresh;
     scr_str_release(piece);
     piece = fresh;
@@ -2309,28 +2333,28 @@ static __attribute__((noinline)) const char *scr_str_split_unit(ScrSplitCursor *
  * Eager consumers select the unit/substring path once before their loop. */
 static inline __attribute__((always_inline)) const char *
 scr_str_split_span(ScrStr *s, ScrStr *sep, ScrSplitCursor *cursor, bool units, size_t *len) {
-  if (cursor->remaining == 0 || cursor->offset > s->len) return NULL;
+  if (cursor->remaining == 0 || cursor->offset > scr_str_flat_view(s)->len) return NULL;
   if (units) {
     if (cursor->pending_unit) return scr_str_split_unit(cursor, cursor->pending_unit, 0, len);
-    if (cursor->offset == s->len) return NULL;
+    if (cursor->offset == scr_str_flat_view(s)->len) return NULL;
     size_t start = cursor->offset, adv;
-    uint32_t cp = scr_utf8_decode(s->data + start, &adv);
+    uint32_t cp = scr_utf8_decode(scr_str_flat_view(s)->data + start, &adv);
     cursor->offset += adv;
     cursor->remaining--;
     if (cp >= 0x10000) return scr_str_split_unit(cursor, scr_cp_high(cp), scr_cp_low(cp), len);
     *len = adv;
-    return s->data + start;
+    return scr_str_flat_view(s)->data + start;
   }
   size_t start = cursor->offset;
-  const char *found = scr_byte_find(s->data + start, s->len - start,
-                                    sep->data, sep->len);
-  size_t end = found ? (size_t)(found - s->data) : s->len;
+  const char *found = scr_byte_find(scr_str_flat_view(s)->data + start, scr_str_flat_view(s)->len - start,
+                                    scr_str_flat_view(sep)->data, scr_str_flat_view(sep)->len);
+  size_t end = found ? (size_t)(found - scr_str_flat_view(s)->data) : scr_str_flat_view(s)->len;
   /* String allocations reserve the header and terminator, so len + 1
    * cannot overflow. This sentinel includes a final empty trailing piece. */
-  cursor->offset = found ? end + sep->len : s->len + 1;
+  cursor->offset = found ? end + scr_str_flat_view(sep)->len : scr_str_flat_view(s)->len + 1;
   cursor->remaining--;
   *len = end - start;
-  return s->data + start;
+  return scr_str_flat_view(s)->data + start;
 }
 
 /* The source snapshot owns these bytes through the current iteration.
@@ -2338,7 +2362,7 @@ scr_str_split_span(ScrStr *s, ScrStr *sep, ScrSplitCursor *cursor, bool units, s
  * with ordinary string ownership instead. */
 const char *scr_str_split_cursor_span(ScrStr *s, ScrStr *sep, ScrSplitCursor *cursor,
                                      size_t *length) {
-  return scr_str_split_span(s, sep, cursor, sep->len == 0, length);
+  return scr_str_split_span(s, sep, cursor, scr_str_flat_view(sep)->len == 0, length);
 }
 
 ScrStr *scr_str_split_materialize(const char *bytes, size_t length, ScrStr **scratch) {
@@ -2348,7 +2372,7 @@ ScrStr *scr_str_split_materialize(const char *bytes, size_t length, ScrStr **scr
 ScrStr *scr_str_split_cursor_next(ScrStr *s, ScrStr *sep, ScrSplitCursor *cursor,
                                   ScrStr **scratch) {
   size_t len;
-  const char *bytes = scr_str_split_span(s, sep, cursor, sep->len == 0, &len);
+  const char *bytes = scr_str_split_span(s, sep, cursor, scr_str_flat_view(sep)->len == 0, &len);
   if (!bytes) return NULL;
   return scr_str_split_piece(bytes, len, scratch);
 }
@@ -2360,11 +2384,11 @@ static void scr_str_split_fill(ScrArr *out, ScrStr *s, ScrStr *sep,
   uint64_t slots[64];
   if (units && s->ascii) {
     /* Every unit of an ASCII receiver is an interned one-character string. */
-    while (cursor->remaining && cursor->offset < s->len) {
+    while (cursor->remaining && cursor->offset < scr_str_flat_view(s)->len) {
       size_t count = 0;
-      while (count < 64 && cursor->remaining && cursor->offset < s->len) {
+      while (count < 64 && cursor->remaining && cursor->offset < scr_str_flat_view(s)->len) {
         slots[count++] =
-            (uint64_t)(uintptr_t)&scr_ascii1[(unsigned char)s->data[cursor->offset++]];
+            (uint64_t)(uintptr_t)&scr_ascii1[(unsigned char)scr_str_flat_view(s)->data[cursor->offset++]];
         cursor->remaining--;
       }
       scr_arr_push_many(out, count, slots);
@@ -2387,14 +2411,14 @@ ScrArr *scr_str_split_limit(ScrStr *s, ScrStr *sep, double limit_num) {
   uint32_t limit = scr_to_uint32(limit_num);
   /* An empty separator yields one piece per UTF-16 unit: size it once. */
   size_t pieces = 0;
-  if (sep->len == 0) {
-    pieces = s->ascii ? s->len : scr_sidx_len(s, scr_sidx(s));
+  if (scr_str_flat_view(sep)->len == 0) {
+    pieces = s->ascii ? scr_str_flat_view(s)->len : scr_sidx_len(s, scr_sidx(s));
     if (pieces > limit) pieces = limit;
   }
   ScrArr *out = scr_arr_new(SCR_ELEM_STR, pieces);
   ScrSplitCursor cursor;
   scr_str_split_cursor_init(&cursor, limit);
-  if (sep->len == 0) scr_str_split_fill(out, s, sep, &cursor, true);
+  if (scr_str_flat_view(sep)->len == 0) scr_str_split_fill(out, s, sep, &cursor, true);
   else scr_str_split_fill(out, s, sep, &cursor, false);
   return out;
 }
@@ -2415,14 +2439,14 @@ static void scr_replace_template(ScrJsonBuf *b, const char *before, size_t befor
                                  const char *match, size_t match_len, const char *after,
                                  size_t after_len, const ScrStr *rep) {
   size_t i = 0;
-  while (i < rep->len) {
-    const char *dollar = memchr(rep->data + i, '$', rep->len - i);
-    size_t stop = dollar ? (size_t)(dollar - rep->data) : rep->len;
-    scr_jb_write(b, rep->data + i, stop - i);
+  while (i < scr_str_flat_view(rep)->len) {
+    const char *dollar = memchr(scr_str_flat_view(rep)->data + i, '$', scr_str_flat_view(rep)->len - i);
+    size_t stop = dollar ? (size_t)(dollar - scr_str_flat_view(rep)->data) : scr_str_flat_view(rep)->len;
+    scr_jb_write(b, scr_str_flat_view(rep)->data + i, stop - i);
     if (!dollar) return;
     i = stop;
-    char next = i + 1 < rep->len ? rep->data[i + 1] : '\0';
-    if (i + 1 < rep->len && (next == '$' || next == '&' || next == '`' || next == '\'')) {
+    char next = i + 1 < scr_str_flat_view(rep)->len ? scr_str_flat_view(rep)->data[i + 1] : '\0';
+    if (i + 1 < scr_str_flat_view(rep)->len && (next == '$' || next == '&' || next == '`' || next == '\'')) {
       if (next == '$') scr_jb_putc(b, '$');
       else if (next == '&') scr_jb_write(b, match, match_len);
       else if (next == '`') scr_jb_write(b, before, before_len);
@@ -2441,17 +2465,17 @@ const char *scr_str_find_bytes(const char *hay, size_t hay_len, const char *need
 }
 
 ScrStr *scr_str_replace_bytes(ScrStr *s, const char *pat, size_t plen, ScrStr *rep, bool all) {
-  const char *end = s->data + s->len;
-  const char *hit = scr_byte_find(s->data, s->len, pat, plen);
+  const char *end = scr_str_flat_view(s)->data + scr_str_flat_view(s)->len;
+  const char *hit = scr_byte_find(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, pat, plen);
   if (!hit) return scr_str_retain(s);
-  if (memchr(rep->data, '$', rep->len) != NULL) {
+  if (memchr(scr_str_flat_view(rep)->data, '$', scr_str_flat_view(rep)->len) != NULL) {
     ScrJsonBuf b;
     scr_jb_init(&b);
-    const char *from = s->data;
+    const char *from = scr_str_flat_view(s)->data;
     while (hit) {
-      size_t pos = (size_t)(hit - s->data);
+      size_t pos = (size_t)(hit - scr_str_flat_view(s)->data);
       scr_jb_write(&b, from, (size_t)(hit - from));
-      scr_replace_template(&b, s->data, pos, hit, plen, hit + plen, s->len - pos - plen, rep);
+      scr_replace_template(&b, scr_str_flat_view(s)->data, pos, hit, plen, hit + plen, scr_str_flat_view(s)->len - pos - plen, rep);
       from = hit + plen;
       if (!all) break;
       hit = scr_byte_find(from, (size_t)(end - from), pat, plen);
@@ -2462,41 +2486,41 @@ ScrStr *scr_str_replace_bytes(ScrStr *s, const char *pat, size_t plen, ScrStr *r
   /* A plain replacement: one pass into a block with room for a few
    * growing hits; a longer result grows geometrically, and a result well
    * below its block is trimmed. */
-  size_t grow = rep->len > plen ? rep->len - plen : 0;
-  size_t cap = s->len + (grow < 64 ? 4 * grow : grow) + 16;
+  size_t grow = scr_str_flat_view(rep)->len > plen ? scr_str_flat_view(rep)->len - plen : 0;
+  size_t cap = scr_str_flat_view(s)->len + (grow < 64 ? 4 * grow : grow) + 16;
   if (cap > SCR_STR_MAX_CAP) cap = SCR_STR_MAX_CAP;
   ScrStr *out = scr_str_alloc_raw(0, cap);
   cap = out->cap;
   size_t used = 0;
-  const char *from = s->data;
+  const char *from = scr_str_flat_view(s)->data;
   /* A seam can complete a surrogate pair only where a piece starts with a
    * lone low surrogate: the replacement, or the subject after a match. */
   bool joins = false;
   for (;;) {
     size_t gap = hit ? (size_t)(hit - from) : (size_t)(end - from);
-    size_t need = gap + (hit ? rep->len : 0);
+    size_t need = gap + (hit ? scr_str_flat_view(rep)->len : 0);
     if (need > cap - used) {
       if (need > SCR_STR_MAX_CAP - used) scr_oom();
       size_t want = cap * 2 < used + need + (size_t)(end - from) ? used + need + (size_t)(end - from)
                                                                  : cap * 2;
       if (want > SCR_STR_MAX_CAP) want = SCR_STR_MAX_CAP;
-      out->len = used;
+      scr_str_flat_view(out)->len = used;
       out = scr_str_regrow(out, want);
       cap = want;
     }
-    scr_copy_bytes(out->data + used, from, gap);
+    scr_copy_bytes(scr_str_flat_view(out)->data + used, from, gap);
     used += gap;
     if (!hit) break;
-    if (rep->len) joins |= scr_wtf8_joins(out->data, used, rep->data, rep->len);
-    scr_copy_bytes(out->data + used, rep->data, rep->len);
-    used += rep->len;
+    if (scr_str_flat_view(rep)->len) joins |= scr_wtf8_joins(scr_str_flat_view(out)->data, used, scr_str_flat_view(rep)->data, scr_str_flat_view(rep)->len);
+    scr_copy_bytes(scr_str_flat_view(out)->data + used, scr_str_flat_view(rep)->data, scr_str_flat_view(rep)->len);
+    used += scr_str_flat_view(rep)->len;
     from = hit + plen;
     joins |= (unsigned char)*from == 0xED;
     hit = all ? scr_byte_find(from, (size_t)(end - from), pat, plen) : NULL;
   }
-  out->len = used;
+  scr_str_flat_view(out)->len = used;
   if (cap - used > used / 4 + 64) out = scr_str_regrow(out, used);
-  out->data[used] = '\0';
+  scr_str_flat_view(out)->data[used] = '\0';
   scr_str_hash_forget(out);
   if (joins && scr_wtf8_any()) scr_str_fuse_surrogates(out);
   else if (s->ascii && rep->ascii) scr_str_note_ascii(out);
@@ -2531,13 +2555,13 @@ static size_t scr_replace_chars_next(const char *p, size_t i, size_t len, const 
 
 ScrStr *scr_str_replace_chars(ScrStr *s, ScrStr *chars, ScrStr *texts) {
   enum { MAX = 16 };
-  size_t n = chars->len < MAX ? chars->len : MAX;
+  size_t n = scr_str_flat_view(chars)->len < MAX ? scr_str_flat_view(chars)->len : MAX;
   uint8_t which[128] = { 0 };
   const char *text[MAX];
   size_t text_len[MAX];
   size_t grow = 0;
   bool ascii = s->ascii;
-  const char *t = texts->data, *t_end = texts->data + texts->len;
+  const char *t = scr_str_flat_view(texts)->data, *t_end = scr_str_flat_view(texts)->data + scr_str_flat_view(texts)->len;
   for (size_t k = 0; k < n; k++) {
     const char *stop = memchr(t, '\0', (size_t)(t_end - t));
     if (!stop) stop = t_end;
@@ -2545,12 +2569,12 @@ ScrStr *scr_str_replace_chars(ScrStr *s, ScrStr *chars, ScrStr *texts) {
     text_len[k] = (size_t)(stop - t);
     if (text_len[k] > grow) grow = text_len[k];
     if (ascii && !scr_bytes_all_ascii(t, text_len[k])) ascii = false;
-    which[(unsigned char)chars->data[k] & 0x7F] = (uint8_t)(k + 1);
+    which[(unsigned char)scr_str_flat_view(chars)->data[k] & 0x7F] = (uint8_t)(k + 1);
     t = stop < t_end ? stop + 1 : t_end;
   }
-  const char *p = s->data;
-  size_t len = s->len;
-  size_t i = scr_replace_chars_next(p, 0, len, which, chars->data, n);
+  const char *p = scr_str_flat_view(s)->data;
+  size_t len = scr_str_flat_view(s)->len;
+  size_t i = scr_replace_chars_next(p, 0, len, which, scr_str_flat_view(chars)->data, n);
   if (i == len) return scr_str_retain(s);
   grow = grow > 1 ? grow - 1 : 0;
   size_t cap = len + (grow < 64 ? 4 * grow : grow) + 16;
@@ -2568,23 +2592,23 @@ ScrStr *scr_str_replace_chars(ScrStr *s, ScrStr *chars, ScrStr *texts) {
       if (need > SCR_STR_MAX_CAP - used) scr_oom();
       size_t want = cap * 2 < used + need + (len - from) ? used + need + (len - from) : cap * 2;
       if (want > SCR_STR_MAX_CAP) want = SCR_STR_MAX_CAP;
-      out->len = used;
+      scr_str_flat_view(out)->len = used;
       out = scr_str_regrow(out, want);
       cap = want;
     }
-    scr_copy_bytes(out->data + used, p + from, gap);
+    scr_copy_bytes(scr_str_flat_view(out)->data + used, p + from, gap);
     used += gap;
     if (i == len) break;
-    if (text_len[k]) joins |= scr_wtf8_joins(out->data, used, text[k], text_len[k]);
-    scr_copy_bytes(out->data + used, text[k], text_len[k]);
+    if (text_len[k]) joins |= scr_wtf8_joins(scr_str_flat_view(out)->data, used, text[k], text_len[k]);
+    scr_copy_bytes(scr_str_flat_view(out)->data + used, text[k], text_len[k]);
     used += text_len[k];
     from = i + 1;
     joins |= (unsigned char)p[from] == 0xED;
-    i = scr_replace_chars_next(p, from, len, which, chars->data, n);
+    i = scr_replace_chars_next(p, from, len, which, scr_str_flat_view(chars)->data, n);
   }
-  out->len = used;
+  scr_str_flat_view(out)->len = used;
   if (cap - used > used / 4 + 64) out = scr_str_regrow(out, used);
-  out->data[used] = '\0';
+  scr_str_flat_view(out)->data[used] = '\0';
   scr_str_hash_forget(out);
   if (joins && scr_wtf8_any()) scr_str_fuse_surrogates(out);
   else if (ascii) scr_str_note_ascii(out);
@@ -2592,28 +2616,28 @@ ScrStr *scr_str_replace_chars(ScrStr *s, ScrStr *chars, ScrStr *texts) {
 }
 
 ScrStr *scr_str_replace_literal(ScrStr *s, ScrStr *search, ScrStr *rep, bool all) {
-  if (search->len) return scr_str_replace_bytes(s, search->data, search->len, rep, all);
+  if (scr_str_flat_view(search)->len) return scr_str_replace_bytes(s, scr_str_flat_view(search)->data, scr_str_flat_view(search)->len, rep, all);
   ScrJsonBuf b;
   scr_jb_init(&b);
   if (!all) {
-    scr_replace_template(&b, s->data, 0, s->data, 0, s->data, s->len, rep);
-    scr_jb_write(&b, s->data, s->len);
+    scr_replace_template(&b, scr_str_flat_view(s)->data, 0, scr_str_flat_view(s)->data, 0, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, rep);
+    scr_jb_write(&b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
     return scr_jb_finish(&b);
   }
   /* The empty needle matches at every UTF-16 position, including between
    * the halves of a surrogate pair; those spans follow slice's contract. */
   size_t len16 = (size_t)scr_str_utf16_len(s);
-  if (len16 == s->len) {
-    for (size_t k = 0; k <= s->len; k++) {
-      scr_replace_template(&b, s->data, k, s->data + k, 0, s->data + k, s->len - k, rep);
-      if (k < s->len) scr_jb_putc(&b, s->data[k]);
+  if (len16 == scr_str_flat_view(s)->len) {
+    for (size_t k = 0; k <= scr_str_flat_view(s)->len; k++) {
+      scr_replace_template(&b, scr_str_flat_view(s)->data, k, scr_str_flat_view(s)->data + k, 0, scr_str_flat_view(s)->data + k, scr_str_flat_view(s)->len - k, rep);
+      if (k < scr_str_flat_view(s)->len) scr_jb_putc(&b, scr_str_flat_view(s)->data[k]);
     }
     return scr_jb_finish(&b);
   }
   for (size_t k = 0; k <= len16; k++) {
     ScrStr *before = scr_str_slice(s, 0, (double)k);
     ScrStr *after = scr_str_slice(s, (double)k, (double)len16);
-    scr_replace_template(&b, before->data, before->len, after->data, 0, after->data, after->len,
+    scr_replace_template(&b, scr_str_flat_view(before)->data, scr_str_flat_view(before)->len, scr_str_flat_view(after)->data, 0, scr_str_flat_view(after)->data, scr_str_flat_view(after)->len,
                          rep);
     scr_str_release(before);
     scr_str_release(after);
@@ -2637,7 +2661,7 @@ static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
                              bool at_start) {
   double target = scr_to_integer_or_infinity(maxLength);
   size_t len16 = scr_sidx_len(s, scr_sidx_for(s));
-  if (!(target > (double)len16) || fill->len == 0) return scr_str_retain(s);
+  if (!(target > (double)len16) || scr_str_flat_view(fill)->len == 0) return scr_str_retain(s);
   /* Reject pad sizes malloc could not satisfy before the double→size_t
    * conversion can overflow (each unit is at most 3 bytes here: BMP chars
    * and lone surrogates; astral chars are 4 bytes for 2 units). */
@@ -2651,7 +2675,7 @@ static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
   size_t prefix_b = 0, prefix_units = 0;
   bool prefix_half = false;
   while (prefix_units < rem16) {
-    size_t seq = scr_utf8_seq_len((unsigned char)fill->data[prefix_b]);
+    size_t seq = scr_utf8_seq_len((unsigned char)scr_str_flat_view(fill)->data[prefix_b]);
     size_t w = seq == 4 ? 2 : 1;
     if (prefix_units + w > rem16) { /* astral char split by the truncation */
       prefix_half = true;
@@ -2661,28 +2685,28 @@ static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
     prefix_b += seq;
     prefix_units += w;
   }
-  size_t pad_b = reps * fill->len + prefix_b + (prefix_half ? 3 : 0);
-  if (pad_b > SIZE_MAX - sizeof(ScrStr) - 1 - s->len) scr_oom();
-  size_t total = s->len + pad_b;
+  size_t pad_b = reps * scr_str_flat_view(fill)->len + prefix_b + (prefix_half ? 3 : 0);
+  if (pad_b > SIZE_MAX - sizeof(ScrStr) - 1 - scr_str_flat_view(s)->len) scr_oom();
+  size_t total = scr_str_flat_view(s)->len + pad_b;
   ScrStr *r = scr_str_alloc(total, total);
-  char *w = r->data + (at_start ? 0 : s->len);
+  char *w = scr_str_flat_view(r)->data + (at_start ? 0 : scr_str_flat_view(s)->len);
   for (size_t i = 0; i < reps; i++) {
-    memcpy(w, fill->data, fill->len);
-    w += fill->len;
+    memcpy(w, scr_str_flat_view(fill)->data, scr_str_flat_view(fill)->len);
+    w += scr_str_flat_view(fill)->len;
   }
-  memcpy(w, fill->data, prefix_b);
+  memcpy(w, scr_str_flat_view(fill)->data, prefix_b);
   w += prefix_b;
   if (prefix_half) {
     size_t adv;
-    w += scr_wtf8_put(w, scr_cp_high(scr_utf8_decode(fill->data + prefix_b, &adv)));
+    w += scr_wtf8_put(w, scr_cp_high(scr_utf8_decode(scr_str_flat_view(fill)->data + prefix_b, &adv)));
   }
-  memcpy(at_start ? w : r->data, s->data, s->len);
-  r->data[total] = '\0';
+  memcpy(at_start ? w : scr_str_flat_view(r)->data, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  scr_str_flat_view(r)->data[total] = '\0';
   /* Only a piece that starts with a lone low surrogate can complete a
    * pair across a seam: the fill (after a fill or the receiver) or the
    * receiver (after a fill ending in a high surrogate). */
   if (scr_wtf8_any() &&
-      ((unsigned char)fill->data[0] == 0xED || (unsigned char)s->data[0] == 0xED))
+      ((unsigned char)scr_str_flat_view(fill)->data[0] == 0xED || (unsigned char)scr_str_flat_view(s)->data[0] == 0xED))
     scr_str_fuse_surrogates(r);
   return r;
 }
@@ -2837,7 +2861,7 @@ static double scr_digits_to_double(const char *p, size_t n, int radix) {
 }
 
 double scr_parse_int(ScrStr *s, double radix) {
-  return scr_parse_int_bytes(s->data, s->len, radix);
+  return scr_parse_int_bytes(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len, radix);
 }
 
 double scr_parse_int_bytes(const char *p, size_t n, double radix) {
@@ -2895,8 +2919,8 @@ double scr_parse_int_bytes(const char *p, size_t n, double radix) {
  * would let it claim "0x10" as hex where JS answers 0. strtod on the
  * validated span is correctly rounded (the JSON parser's precedent). */
 double scr_parse_float(ScrStr *s) {
-  const char *p = s->data;
-  size_t n = s->len, i = 0;
+  const char *p = scr_str_flat_view(s)->data;
+  size_t n = scr_str_flat_view(s)->len, i = 0;
   while (i < n) {
     unsigned char c = (unsigned char)p[i];
     if (c > 0x20 && c < 0x80) break; /* ASCII non-whitespace */
@@ -2963,7 +2987,7 @@ double scr_parse_float(ScrStr *s) {
  * Node-exact for giant hex, Infinity overflow included: power-of-two
  * radixes take the exact path, never V8's approximate chunk loop). */
 double scr_string_to_number(ScrStr *s) {
-  return scr_bytes_to_number(s->data, s->len);
+  return scr_bytes_to_number(scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
 }
 
 double scr_bytes_to_number(const char *p, size_t len) {
@@ -3070,13 +3094,13 @@ static bool scr_uri_unencodable(const ScrStr *s) {
 
 static ScrStr *scr_encode_uri_impl(ScrStr *s, bool keep_reserved) {
   if (scr_uri_unencodable(s)) return scr_str_empty();
-  const unsigned char *b = (const unsigned char *)s->data;
-  size_t n = s->len, out_len = 0;
+  const unsigned char *b = (const unsigned char *)scr_str_flat_view(s)->data;
+  size_t n = scr_str_flat_view(s)->len, out_len = 0;
   for (size_t i = 0; i < n; i++) out_len += scr_uri_unescaped(b[i], keep_reserved) ? 1 : 3;
   if (out_len == n) return scr_str_retain(s); /* nothing escapes — share */
   ScrStr *out = scr_str_alloc_raw(out_len, out_len);
   static const char hex[] = "0123456789ABCDEF";
-  char *w = out->data;
+  char *w = scr_str_flat_view(out)->data;
   for (size_t i = 0; i < n; i++) {
     if (scr_uri_unescaped(b[i], keep_reserved)) {
       *w++ = (char)b[i];
@@ -3086,8 +3110,8 @@ static ScrStr *scr_encode_uri_impl(ScrStr *s, bool keep_reserved) {
       *w++ = hex[b[i] & 0xF];
     }
   }
-  out->len = out_len;
-  out->data[out_len] = '\0';
+  scr_str_flat_view(out)->len = out_len;
+  scr_str_flat_view(out)->data[out_len] = '\0';
   return out;
 }
 
@@ -3102,12 +3126,15 @@ ScrStr *scr_encode_uri(ScrStr *s) { return scr_encode_uri_impl(s, true); }
 bool scr_str_is_well_formed(ScrStr *s) { return !scr_str_has_surrogate(s); }
 
 ScrStr *scr_str_to_well_formed(ScrStr *s) {
+  /* A native slice can introduce a lone surrogate without encoding it yet.
+   * Materialize before consulting the process's known-lone-surrogate flag. */
+  ScrStr *flat = scr_str_flat_view(s);
   if (s->ascii || !scr_wtf8_any()) return scr_str_retain(s);
-  const char *hit = scr_wtf8_find_surrogate(s->data, s->len);
+  const char *hit = scr_wtf8_find_surrogate(flat->data, flat->len);
   if (!hit) return scr_str_retain(s);
-  size_t at = (size_t)(hit - s->data);
-  ScrStr *r = scr_str_new(s->data, s->len);
-  scr_wtf8_replace_surrogates(r->data + at, s->len - at);
+  size_t at = (size_t)(hit - flat->data);
+  ScrStr *r = scr_str_new(flat->data, flat->len);
+  scr_wtf8_replace_surrogates(r->data + at, flat->len - at);
   return r;
 }
 
@@ -3134,18 +3161,18 @@ ScrStr *scr_bool_to_scrstr(bool b) {
 ScrStr *scr_str_cp_at(ScrStr *s, double i) {
   double idx = scr_to_integer_or_infinity(i);
   if (!(idx >= 0)) return scr_str_empty();
-  if (idx >= (double)s->len) return scr_str_empty(); /* len16 <= len */
-  if (s->ascii) return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  if (idx >= (double)scr_str_flat_view(s)->len) return scr_str_empty(); /* len16 <= len */
+  if (s->ascii) return (ScrStr *)&scr_ascii1[(unsigned char)scr_str_flat_view(s)->data[(size_t)idx]];
   ScrSidx *e = scr_sidx(s);
-  if (s->ascii || e->u16len == s->len) { /* all ASCII */
-    return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  if (s->ascii || e->u16len == scr_str_flat_view(s)->len) { /* all ASCII */
+    return (ScrStr *)&scr_ascii1[(unsigned char)scr_str_flat_view(s)->data[(size_t)idx]];
   }
   bool mid;
   size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
-  if (off >= s->len) return scr_str_empty(); /* out of range */
+  if (off >= scr_str_flat_view(s)->len) return scr_str_empty(); /* out of range */
   size_t adv;
-  (void)scr_utf8_decode(s->data + off, &adv);
-  return scr_str_from_span(s->data + off, adv);
+  (void)scr_utf8_decode(scr_str_flat_view(s)->data + off, &adv);
+  return scr_str_from_span(scr_str_flat_view(s)->data + off, adv);
 }
 
 /* ── the URI component codecs (encodeURIComponent/decodeURIComponent) ──
@@ -3172,18 +3199,18 @@ static bool scr_uri_unreserved(unsigned char c) {
 ScrStr *scr_str_encode_uri_component(ScrStr *s) {
   if (scr_uri_unencodable(s)) return scr_str_empty();
   size_t extra = 0;
-  for (size_t i = 0; i < s->len; i++) {
-    if (!scr_uri_unreserved((unsigned char)s->data[i])) extra += 2;
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    if (!scr_uri_unreserved((unsigned char)scr_str_flat_view(s)->data[i])) extra += 2;
   }
   if (extra == 0) {
     scr_str_retain(s);
     return s;
   }
   static const char hex[] = "0123456789ABCDEF";
-  ScrStr *out = scr_str_alloc_raw(s->len + extra, s->len + extra);
-  char *w = out->data;
-  for (size_t i = 0; i < s->len; i++) {
-    unsigned char c = (unsigned char)s->data[i];
+  ScrStr *out = scr_str_alloc_raw(scr_str_flat_view(s)->len + extra, scr_str_flat_view(s)->len + extra);
+  char *w = scr_str_flat_view(out)->data;
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     if (scr_uri_unreserved(c)) {
       *w++ = (char)c;
     } else {
@@ -3192,7 +3219,7 @@ ScrStr *scr_str_encode_uri_component(ScrStr *s) {
       *w++ = hex[c & 0xf];
     }
   }
-  out->data[out->len] = '\0';
+  scr_str_flat_view(out)->data[scr_str_flat_view(out)->len] = '\0';
   return out;
 }
 
@@ -3204,22 +3231,22 @@ static void scr_uri_malformed(void) {
 ScrStr *scr_qs_encode_str(const ScrStr *s, const signed char no_escape[128]) {
   static const char hex[] = "0123456789ABCDEF";
   /* UTF-16 code units: each 4-byte sequence is a surrogate pair. */
-  uint16_t *units = malloc((s->len ? s->len : 1) * sizeof *units);
+  uint16_t *units = malloc((scr_str_flat_view(s)->len ? scr_str_flat_view(s)->len : 1) * sizeof *units);
   if (!units) scr_trap("scriptc: out of memory\n");
   size_t n = 0;
-  for (size_t i = 0; i < s->len;) {
-    unsigned char c = (unsigned char)s->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(s)->len;) {
+    unsigned char c = (unsigned char)scr_str_flat_view(s)->data[i];
     uint32_t cp;
     size_t len = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-    if (len > s->len - i) len = s->len - i;
+    if (len > scr_str_flat_view(s)->len - i) len = scr_str_flat_view(s)->len - i;
     if (len == 1) cp = c;
-    else if (len == 2) cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s->data[i + 1] & 0x3F);
+    else if (len == 2) cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F);
     else if (len == 3)
-      cp = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)((unsigned char)s->data[i + 1] & 0x3F) << 6) |
-           ((unsigned char)s->data[i + 2] & 0x3F);
+      cp = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F) << 6) |
+           ((unsigned char)scr_str_flat_view(s)->data[i + 2] & 0x3F);
     else
-      cp = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)((unsigned char)s->data[i + 1] & 0x3F) << 12) |
-           ((uint32_t)((unsigned char)s->data[i + 2] & 0x3F) << 6) | ((unsigned char)s->data[i + 3] & 0x3F);
+      cp = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 1] & 0x3F) << 12) |
+           ((uint32_t)((unsigned char)scr_str_flat_view(s)->data[i + 2] & 0x3F) << 6) | ((unsigned char)scr_str_flat_view(s)->data[i + 3] & 0x3F);
     i += len;
     if (cp >= 0x10000) {
       units[n++] = (uint16_t)(0xD800 + ((cp - 0x10000) >> 10));
@@ -3314,13 +3341,13 @@ static int scr_uri_hex_byte(const char *p, size_t rem) {
  * entry point below stays byte-identical by rethrowing over NULL. */
 static ScrStr *scr_str_decode_uri_try(ScrStr *s, bool reserved) {
   /* Decoding only ever shrinks (%XX → 1 byte), so len is a safe cap. */
-  ScrStr *out = scr_str_alloc_raw(0, s->len);
+  ScrStr *out = scr_str_alloc_raw(0, scr_str_flat_view(s)->len);
   size_t w = 0;
-  const char *p = s->data;
-  size_t n = s->len, i = 0;
+  const char *p = scr_str_flat_view(s)->data;
+  size_t n = scr_str_flat_view(s)->len, i = 0;
   while (i < n) {
     if (p[i] != '%') {
-      out->data[w++] = p[i++];
+      scr_str_flat_view(out)->data[w++] = p[i++];
       continue;
     }
     int b0 = scr_uri_hex_byte(p + i, n - i);
@@ -3328,12 +3355,12 @@ static ScrStr *scr_str_decode_uri_try(ScrStr *s, bool reserved) {
     i += 3;
     if (b0 < 0x80) {
       if (reserved && b0 != 0 && strchr(";/?:@&=+$,#", b0)) {
-        memcpy(out->data + w, p + i - 3, 3);
+        memcpy(scr_str_flat_view(out)->data + w, p + i - 3, 3);
         w += 3;
         continue;
       }
       /* The empty component reserved set: every ASCII escape decodes. */
-      out->data[w++] = (char)b0;
+      scr_str_flat_view(out)->data[w++] = (char)b0;
       continue;
     }
     /* Multibyte: the continuation bytes must ALSO be escapes (a raw byte
@@ -3349,17 +3376,17 @@ static ScrStr *scr_str_decode_uri_try(ScrStr *s, bool reserved) {
     else if (b0 == 0xF4) { need = 3; hi = 0x8F; } /* <= U+10FFFF */
     else if (b0 >= 0xF1 && b0 <= 0xF3) need = 3;
     else goto malformed; /* 0x80..0xC1, 0xF5..0xFF: never a leading byte */
-    out->data[w++] = (char)b0;
+    scr_str_flat_view(out)->data[w++] = (char)b0;
     for (int k = 0; k < need; k++) {
       int bc = scr_uri_hex_byte(p + i, n - i);
       if (bc < 0) goto malformed;
       if (k == 0 ? (bc < lo || bc > hi) : (bc < 0x80 || bc > 0xBF)) goto malformed;
       i += 3;
-      out->data[w++] = (char)bc;
+      scr_str_flat_view(out)->data[w++] = (char)bc;
     }
   }
-  out->len = w;
-  out->data[w] = '\0';
+  scr_str_flat_view(out)->len = w;
+  scr_str_flat_view(out)->data[w] = '\0';
   return out;
 malformed:
   scr_str_release(out);
@@ -3525,8 +3552,8 @@ static inline bool scr_coll_starts_contraction(uint32_t c) {
 static bool scr_coll_elements(const ScrStr *s, ScrCollBuf *b) {
   /* At most three elements per code point and one code point per byte:
    * reserve once, so the loop below needs no capacity checks. */
-  if (s->len > SIZE_MAX / 3 / sizeof(ScrCollElem)) scr_oom();
-  size_t need = 3 * s->len;
+  if (scr_str_flat_view(s)->len > SIZE_MAX / 3 / sizeof(ScrCollElem)) scr_oom();
+  size_t need = 3 * scr_str_flat_view(s)->len;
   if (need > b->cap) {
     b->e = malloc(need * sizeof *b->e);
     if (!b->e) scr_oom();
@@ -3535,8 +3562,8 @@ static bool scr_coll_elements(const ScrStr *s, ScrCollBuf *b) {
   const ScrCollAscii *ascii = scr_coll_ascii();
   ScrCollElem *e = b->e;
   size_t n = 0;
-  const unsigned char *p = (const unsigned char *)s->data;
-  const unsigned char *end = p + s->len;
+  const unsigned char *p = (const unsigned char *)scr_str_flat_view(s)->data;
+  const unsigned char *end = p + scr_str_flat_view(s)->len;
   while (p < end) {
     uint32_t c = *p;
     if (c < 0x80 && scr_coll_ascii_plain[c]) {
@@ -3583,7 +3610,7 @@ typedef struct {
 /* 0: every code point is covered and no mark carries a primary weight;
  * 1: covered, with such a mark; 2: a code point outside the table. */
 static int scr_coll_scan(const ScrStr *s) {
-  const unsigned char *p = (const unsigned char *)s->data, *end = p + s->len;
+  const unsigned char *p = (const unsigned char *)scr_str_flat_view(s)->data, *end = p + scr_str_flat_view(s)->len;
   int result = 0;
   while (p < end) {
     if (*p < 0x80 && scr_coll_ascii_plain[*p]) {
@@ -3626,8 +3653,8 @@ static unsigned scr_coll_next_primary(const ScrCollAscii *ascii, ScrCollCursor *
 
 /* The primary level of two strings scr_coll_scan answered 0 for. */
 static int scr_coll_primary(const ScrCollAscii *ascii, const ScrStr *a, const ScrStr *b) {
-  ScrCollCursor x = {(const unsigned char *)a->data, (const unsigned char *)a->data + a->len, NULL, 0};
-  ScrCollCursor y = {(const unsigned char *)b->data, (const unsigned char *)b->data + b->len, NULL, 0};
+  ScrCollCursor x = {(const unsigned char *)scr_str_flat_view(a)->data, (const unsigned char *)scr_str_flat_view(a)->data + scr_str_flat_view(a)->len, NULL, 0};
+  ScrCollCursor y = {(const unsigned char *)scr_str_flat_view(b)->data, (const unsigned char *)scr_str_flat_view(b)->data + scr_str_flat_view(b)->len, NULL, 0};
   for (;;) {
     unsigned pa = scr_coll_next_primary(ascii, &x), pb = scr_coll_next_primary(ascii, &y);
     if (pa != pb) return pa == 0 ? -1 : pb == 0 ? 1 : pa < pb ? -1 : 1;
@@ -3668,8 +3695,8 @@ static bool scr_coll_ascii_tail(const unsigned char *p, size_t from, size_t len)
  * the whole comparison to code-point order. Returns -1 or 1, 0 when the
  * primaries are all equal, or 2 when a byte is not covered. */
 static int scr_coll_ascii_primary_bytes(const ScrStr *a, const ScrStr *b) {
-  const unsigned char *x = (const unsigned char *)a->data, *y = (const unsigned char *)b->data;
-  size_t n = a->len, m = b->len, k = n < m ? n : m, i = 0;
+  const unsigned char *x = (const unsigned char *)scr_str_flat_view(a)->data, *y = (const unsigned char *)scr_str_flat_view(b)->data;
+  size_t n = scr_str_flat_view(a)->len, m = scr_str_flat_view(b)->len, k = n < m ? n : m, i = 0;
   int r = 0;
   for (; i < k; i++) {
     unsigned char c = x[i], d = y[i];
@@ -3698,6 +3725,7 @@ static int scr_coll_ascii_primary_bytes(const ScrStr *a, const ScrStr *b) {
  * variable-size memcpy is a library call). */
 _Static_assert(offsetof(ScrStr, data) >= 8, "a short load may start in the header");
 static inline uint64_t scr_coll_partial(const ScrStr *s, size_t i, size_t n) {
+  s = scr_str_flat_view(s);
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   uint64_t v;
   memcpy(&v, (const unsigned char *)s + offsetof(ScrStr, data) + i + n - 8, 8);
@@ -3728,7 +3756,7 @@ static inline uint64_t scr_coll_partial(const ScrStr *s, size_t i, size_t n) {
 static inline uint64_t scr_coll_word(const ScrStr *s, size_t i, size_t n) {
   uint64_t w;
   if (n >= 8) {
-    memcpy(&w, s->data + i, 8);
+    memcpy(&w, scr_str_flat_view(s)->data + i, 8);
     return w;
   }
   return scr_coll_partial(s, i, n) | (SCR_COLL_ONES * 0x20) << (8 * n);
@@ -3742,8 +3770,8 @@ static inline bool scr_coll_word_unusual(uint64_t w) {
 /* 0 when s's bytes from offset `from` on are all 0x20..0x7E, 2 when one of
  * them is non-ASCII, 1 otherwise. */
 static inline int scr_coll_printable_tail(const ScrStr *s, size_t from) {
-  for (size_t i = from; i < s->len; i += 8) {
-    uint64_t w = scr_coll_word(s, i, s->len - i);
+  for (size_t i = from; i < scr_str_flat_view(s)->len; i += 8) {
+    uint64_t w = scr_coll_word(s, i, scr_str_flat_view(s)->len - i);
     if (w & SCR_COLL_HIGHS) return 2;
     if (scr_coll_word_unusual(w)) return 1;
   }
@@ -3758,8 +3786,8 @@ static inline int scr_coll_printable_tail(const ScrStr *s, size_t from) {
  * per-byte pass. */
 static int scr_coll_ascii_primary(const ScrStr *a, const ScrStr *b) {
   if (!scr_coll_ascii_printable) return scr_coll_ascii_primary_bytes(a, b);
-  const unsigned char *x = (const unsigned char *)a->data, *y = (const unsigned char *)b->data;
-  size_t n = a->len, m = b->len, k = n < m ? n : m, i = 0;
+  const unsigned char *x = (const unsigned char *)scr_str_flat_view(a)->data, *y = (const unsigned char *)scr_str_flat_view(b)->data;
+  size_t n = scr_str_flat_view(a)->len, m = scr_str_flat_view(b)->len, k = n < m ? n : m, i = 0;
   int r = 0;
   for (; i < k; i += 8) {
     uint64_t wx = scr_coll_word(a, i, k - i), wy = scr_coll_word(b, i, k - i);
@@ -3787,17 +3815,17 @@ static int scr_coll_ascii_primary(const ScrStr *a, const ScrStr *b) {
 }
 
 static bool scr_coll_ascii_covered(const ScrCollAscii *table, const ScrStr *s) {
-  const unsigned char *p = (const unsigned char *)s->data;
+  const unsigned char *p = (const unsigned char *)scr_str_flat_view(s)->data;
   bool ok = true;
-  for (size_t i = 0; i < s->len; i++) ok &= p[i] < 0x80 && table[p[i]].ok;
+  for (size_t i = 0; i < scr_str_flat_view(s)->len; i++) ok &= p[i] < 0x80 && table[p[i]].ok;
   return ok;
 }
 
 /* scr_coll_level over the elements of two covered ASCII strings. */
 static int scr_coll_ascii_level(const ScrCollAscii *table, const ScrStr *a, const ScrStr *b,
                                 int level) {
-  const unsigned char *x = (const unsigned char *)a->data, *y = (const unsigned char *)b->data;
-  size_t n = a->len, m = b->len, i = 0, j = 0;
+  const unsigned char *x = (const unsigned char *)scr_str_flat_view(a)->data, *y = (const unsigned char *)scr_str_flat_view(b)->data;
+  size_t n = scr_str_flat_view(a)->len, m = scr_str_flat_view(b)->len, i = 0, j = 0;
   for (;;) {
     if (level == 0) {
       while (i < n && table[x[i]].p == 0) i++;
@@ -3816,9 +3844,9 @@ static int scr_coll_ascii_level(const ScrCollAscii *table, const ScrStr *a, cons
 /* Whether two strings have the same bytes; strings of up to 16 bytes
  * compare as two words. */
 static inline bool scr_coll_same_bytes(const ScrStr *a, const ScrStr *b) {
-  size_t n = a->len;
-  if (n != b->len) return false;
-  const unsigned char *x = (const unsigned char *)a->data, *y = (const unsigned char *)b->data;
+  size_t n = scr_str_flat_view(a)->len;
+  if (n != scr_str_flat_view(b)->len) return false;
+  const unsigned char *x = (const unsigned char *)scr_str_flat_view(a)->data, *y = (const unsigned char *)scr_str_flat_view(b)->data;
   if (n > 16) return memcmp(x, y, n) == 0;
   if (n < 8) return n == 0 || scr_coll_partial(a, 0, n) == scr_coll_partial(b, 0, n);
   uint64_t x0, y0, x1, y1;
@@ -3885,3 +3913,5 @@ double scr_str_locale_compare(ScrStr *a, ScrStr *b) {
   }
   return scr_coll_compare_lists(table, a, b);
 }
+
+#include "scr_string_quickjs_prototype.c"

@@ -6,6 +6,11 @@
 
 #include "scr_rc.h"
 
+/* This representation requires matching compiler output and runtime objects. */
+#ifndef SCR_QUICKJS_STRINGS
+#define SCR_QUICKJS_STRINGS 0
+#endif
+
 /* ── strings ──────────────────────────────────────────────────────────
  * UTF-8 bytes, refcounted, immutable. rc == SIZE_MAX marks an immortal
  * interned literal (emitted as a static object; retain/release are no-ops).
@@ -57,6 +62,25 @@ typedef struct ScrStr {
 #endif
   char data[];
 } ScrStr;
+typedef void (*ScrStrOwnerVisitor)(ScrStr *owner, void *context);
+
+/* A borrowed, canonical WTF-8 view. Native strings own this stable view until
+ * their final release. Callers needing bytes must use it for BOTH data and
+ * length; ownership operations still apply to the original string. */
+#if SCR_QUICKJS_STRINGS
+ScrStr *scr_str_utf8_view(const ScrStr *s);
+static inline ScrStr *scr_str_flat_view(const ScrStr *s) {
+  return s && s->cap == SCR_STR_MAX_CAP ? scr_str_utf8_view(s) : (ScrStr *)s;
+}
+void scr_str_prepare_publish(ScrStr *s);
+void scr_str_visit_owners(ScrStr *s, ScrStrOwnerVisitor visit, void *context);
+#else
+static inline ScrStr *scr_str_flat_view(const ScrStr *s) { return (ScrStr *)s; }
+static inline void scr_str_prepare_publish(ScrStr *s) { (void)s; }
+static inline void scr_str_visit_owners(ScrStr *s, ScrStrOwnerVisitor visit, void *context) {
+  (void)s; (void)visit; (void)context;
+}
+#endif
 
 /* Heap strings with capacity > 64 reserve a uint32_t after data[cap]'s NUL
  * slot for their UTF-16 length (UINT32_MAX = unknown). This survives index
@@ -70,13 +94,13 @@ static inline size_t scr_str_length_cache_size(size_t cap) {
 }
 
 static inline void scr_str_length_cache_set(ScrStr *s, uint32_t length) {
-  if (s->rc != SIZE_MAX && s->cap > 64)
+  if (s->rc != SIZE_MAX && s->cap > 64 && (!SCR_QUICKJS_STRINGS || s->cap != SCR_STR_MAX_CAP))
     memcpy(s->data + s->cap + 1, &length, sizeof length);
 }
 
 static inline uint32_t scr_str_length_cache_get(const ScrStr *s) {
   uint32_t length = UINT32_MAX;
-  if (s->rc != SIZE_MAX && s->cap > 64)
+  if (s->rc != SIZE_MAX && s->cap > 64 && (!SCR_QUICKJS_STRINGS || s->cap != SCR_STR_MAX_CAP))
     memcpy(&length, s->data + s->cap + 1, sizeof length);
   return length;
 }
@@ -277,6 +301,7 @@ static inline void scr_wtf8_to_utf8(char *p, size_t n) {
  * release with scr_str_utf8_end. *owned is NULL on the fast path. */
 const char *scr_str_utf8_copy(const ScrStr *s, char **owned);
 static inline const char *scr_str_utf8(const ScrStr *s, char **owned) {
+  s = scr_str_flat_view(s);
   *owned = NULL;
   if (s->ascii || !scr_wtf8_any()) return s->data;
   return scr_str_utf8_copy(s, owned);
@@ -285,6 +310,7 @@ static inline void scr_str_utf8_end(char *owned) {
   if (owned) free(owned);
 }
 static inline bool scr_str_has_surrogate(const ScrStr *s) {
+  s = scr_str_flat_view(s);
   return scr_wtf8_any() && !s->ascii && scr_wtf8_find_surrogate(s->data, s->len) != NULL;
 }
 /* Encode one UTF-16 code unit or code point as WTF-8 (1-4 bytes). */

@@ -87,8 +87,8 @@ static const ScrTextStyle *util_style_lookup(const ScrDyn *key) {
   if (!name) return NULL;
   const ScrTextStyle *result = NULL;
   for (size_t i = 0; i < sizeof util_text_styles / sizeof util_text_styles[0]; i++) {
-    if (name->len == strlen(util_text_styles[i].name) &&
-        !memcmp(name->data, util_text_styles[i].name, name->len)) {
+    if (scr_str_flat_view(name)->len == strlen(util_text_styles[i].name) &&
+        !memcmp(scr_str_flat_view(name)->data, util_text_styles[i].name, scr_str_flat_view(name)->len)) {
       result = &util_text_styles[i]; break;
     }
   }
@@ -97,8 +97,8 @@ static const ScrTextStyle *util_style_lookup(const ScrDyn *key) {
 }
 
 static bool util_style_none(const ScrDyn *key) {
-  return key->kind == SCR_DYN_STR && key->v.str->len == 4 &&
-         !memcmp(key->v.str->data, "none", 4);
+  return key->kind == SCR_DYN_STR && scr_str_flat_view(key->v.str)->len == 4 &&
+         !memcmp(scr_str_flat_view(key->v.str)->data, "none", 4);
 }
 
 static void util_style_invalid(const ScrDyn *key, bool hex) {
@@ -123,7 +123,7 @@ static void util_style_invalid(const ScrDyn *key, bool hex) {
   scr_jb_puts(&message, ". Received ");
   scr_jb_put_str(&message, shown);
   ScrStr *text = scr_jb_finish(&message);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, text->data, text->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(text); scr_str_release(shown);
 }
 
@@ -131,9 +131,9 @@ static void util_style_invalid(const ScrDyn *key, bool hex) {
  * 1 writes its open sequence for #RGB/#RRGGBB, -1 rejects other '#'
  * strings, and 0 leaves every other format to the named styles. */
 static int util_style_hex(const ScrDyn *key, char open[32]) {
-  if (key->kind != SCR_DYN_STR || key->v.str->len == 0 || key->v.str->data[0] != '#') return 0;
-  const char *hex = key->v.str->data + 1;
-  size_t digits = key->v.str->len - 1;
+  if (key->kind != SCR_DYN_STR || scr_str_flat_view(key->v.str)->len == 0 || scr_str_flat_view(key->v.str)->data[0] != '#') return 0;
+  const char *hex = scr_str_flat_view(key->v.str)->data + 1;
+  size_t digits = scr_str_flat_view(key->v.str)->len - 1;
   if (digits != 3 && digits != 6) return -1;
   unsigned value[6];
   for (size_t i = 0; i < digits; i++) {
@@ -162,15 +162,15 @@ static ScrStr *util_style_replace(const ScrStr *text, const char *close,
   size_t close_len = strlen(close), at = 0;
   ScrJsonBuf result;
   scr_jb_init(&result);
-  for (size_t i = 0; i + close_len < text->len;) {
-    if (!memcmp(text->data + i, close, close_len)) {
-      util_style_putn(&result, text->data + at, i - at);
+  for (size_t i = 0; i + close_len < scr_str_flat_view(text)->len;) {
+    if (!memcmp(scr_str_flat_view(text)->data + i, close, close_len)) {
+      util_style_putn(&result, scr_str_flat_view(text)->data + at, i - at);
       if (keep_close) scr_jb_puts(&result, close);
       scr_jb_puts(&result, open);
       i += close_len; at = i;
     } else i++;
   }
-  util_style_putn(&result, text->data + at, text->len - at);
+  util_style_putn(&result, scr_str_flat_view(text)->data + at, scr_str_flat_view(text)->len - at);
   return scr_jb_finish(&result);
 }
 

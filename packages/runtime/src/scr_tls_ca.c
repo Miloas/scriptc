@@ -361,14 +361,14 @@ static ScrArr *scr_ca_default_arr(void) {
 
 ScrArr *scr_tls_ca_get(ScrStr *type) {
   ScrArr *arr = NULL;
-  if (strcmp(type->data, "default") == 0) arr = scr_ca_default_arr();
-  else if (strcmp(type->data, "bundled") == 0) arr = scr_ca_bundled_arr();
-  else if (strcmp(type->data, "system") == 0) arr = scr_ca_system_arr();
-  else if (strcmp(type->data, "extra") == 0) arr = scr_ca_extra_arr();
+  if (strcmp(scr_str_flat_view(type)->data, "default") == 0) arr = scr_ca_default_arr();
+  else if (strcmp(scr_str_flat_view(type)->data, "bundled") == 0) arr = scr_ca_bundled_arr();
+  else if (strcmp(scr_str_flat_view(type)->data, "system") == 0) arr = scr_ca_system_arr();
+  else if (strcmp(scr_str_flat_view(type)->data, "extra") == 0) arr = scr_ca_extra_arr();
   if (arr == NULL) {
     /* Node's ERR_INVALID_ARG_VALUE TypeError, message-exact. */
     char msg[256];
-    int n = snprintf(msg, sizeof msg, "The argument 'type' is invalid. Received '%s'", type->data);
+    int n = snprintf(msg, sizeof msg, "The argument 'type' is invalid. Received '%s'", scr_str_flat_view(type)->data);
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, n < 0 ? 0 : (size_t)n, "ERR_INVALID_ARG_VALUE");
     return NULL;
   }
@@ -386,7 +386,7 @@ void scr_tls_ca_set_default(ScrArr *certs) {
   for (size_t i = 0; i < n; i++) {
     ScrStr *entry = scr_arr_get_ref(certs, (double)i); /* +1 */
     size_t before = (size_t)scr_arr_len(next);
-    blocks += scr_ca_push_pem_blocks(next, entry->data, entry->len);
+    blocks += scr_ca_push_pem_blocks(next, scr_str_flat_view(entry)->data, scr_str_flat_view(entry)->len);
     /* Dedupe the freshly pushed blocks against everything before them. */
     size_t after = (size_t)scr_arr_len(next);
     for (size_t j = after; j > before; j--) {
@@ -394,7 +394,7 @@ void scr_tls_ca_set_default(ScrArr *certs) {
       bool dup = false;
       for (size_t k = 0; k + 1 < j && !dup; k++) {
         ScrStr *prev = scr_arr_get_ref(next, (double)k); /* +1 */
-        dup = prev->len == cand->len && memcmp(prev->data, cand->data, cand->len) == 0;
+        dup = scr_str_flat_view(prev)->len == scr_str_flat_view(cand)->len && memcmp(scr_str_flat_view(prev)->data, scr_str_flat_view(cand)->data, scr_str_flat_view(cand)->len) == 0;
         scr_str_release(prev);
       }
       scr_str_release(cand);
@@ -427,7 +427,7 @@ void scr_tls_ca_set_default(ScrArr *certs) {
   size_t count = (size_t)scr_arr_len(next);
   for (size_t i = 0; i < count; i++) {
     ScrStr *s = scr_arr_get_ref(next, (double)i);
-    total += s->len;
+    total += scr_str_flat_view(s)->len;
     scr_str_release(s);
   }
   char *buf = malloc(total + 1);
@@ -435,8 +435,8 @@ void scr_tls_ca_set_default(ScrArr *certs) {
   size_t off = 0;
   for (size_t i = 0; i < count; i++) {
     ScrStr *s = scr_arr_get_ref(next, (double)i);
-    memcpy(buf + off, s->data, s->len);
-    off += s->len;
+    memcpy(buf + off, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+    off += scr_str_flat_view(s)->len;
     scr_str_release(s);
   }
   buf[off] = '\0';

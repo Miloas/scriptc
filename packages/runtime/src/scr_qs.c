@@ -58,7 +58,7 @@ static void qb_append(QsBuf *b, const char *bytes, size_t n) {
 static void qb_push(QsBuf *b, char c) { qb_append(b, &c, 1); }
 
 static void qb_append_str(QsBuf *b, const ScrStr *s) {
-  qb_append(b, s->data, s->len);
+  qb_append(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
 }
 
 static ScrStr *qb_take(QsBuf *b) {
@@ -131,15 +131,15 @@ static void qs_utf8_encode(QsBuf *b, uint32_t cp) {
  * quirk included, so the fallback builds them first. Caller frees. */
 static uint16_t *qs_utf16_units(const ScrStr *s, size_t *out_n) {
   /* One unit per byte is a safe cap (ASCII 1:1; multibyte shrinks). */
-  uint16_t *units = malloc(sizeof(uint16_t) * (s->len ? s->len : 1));
+  uint16_t *units = malloc(sizeof(uint16_t) * (scr_str_flat_view(s)->len ? scr_str_flat_view(s)->len : 1));
   if (!units) {
     fputs("scriptc: out of memory\n", stderr);
     abort();
   }
   size_t n = 0, i = 0;
-  while (i < s->len) {
+  while (i < scr_str_flat_view(s)->len) {
     size_t adv;
-    uint32_t cp = qs_utf8_decode(s->data + i, &adv);
+    uint32_t cp = qs_utf8_decode(scr_str_flat_view(s)->data + i, &adv);
     i += adv;
     if (cp >= 0x10000) {
       cp -= 0x10000;
@@ -270,27 +270,27 @@ typedef struct {
  * repeats push). key/value move in. */
 static void qs_add_key_val(QsSink *out, ScrStr *key, ScrStr *value,
                            bool key_encoded, bool val_encoded) {
-  if (key->len > 0 && key_encoded) {
+  if (scr_str_flat_view(key)->len > 0 && key_encoded) {
     ScrStr *dec = scr_qs_unescape(key);
     scr_str_release(key);
     key = dec;
   }
-  if (value->len > 0 && val_encoded) {
+  if (scr_str_flat_view(value)->len > 0 && val_encoded) {
     ScrStr *dec = scr_qs_unescape(value);
     scr_str_release(value);
     value = dec;
   }
   if (out->obj) {
-    ScrDyn *cur = scr_dyn_obj_get(out->obj, key->data, key->len);
+    ScrDyn *cur = scr_dyn_obj_get(out->obj, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
     ScrDyn *boxed = scr_dyn_new_str(value);
     scr_str_release(value);
     if (!cur) {
-      scr_dyn_obj_set(out->obj, key->data, key->len, boxed);
+      scr_dyn_obj_set(out->obj, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, boxed);
     } else if (cur->kind == SCR_DYN_STR) {
       ScrDyn *rows = scr_dyn_new_arr();
       scr_dyn_arr_push(rows, scr_dyn_retain(cur));
       scr_dyn_arr_push(rows, boxed);
-      scr_dyn_obj_set(out->obj, key->data, key->len, rows);
+      scr_dyn_obj_set(out->obj, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, rows);
     } else {
       scr_dyn_arr_push(cur, boxed);
     }
@@ -323,19 +323,19 @@ static void qs_add_key_val(QsSink *out, ScrStr *key, ScrStr *value,
 
 static void qs_parse(QsSink *out, const ScrStr *qs, const ScrStr *sep,
                      const ScrStr *eq, double max_keys) {
-  if (qs->len == 0) return;
+  if (scr_str_flat_view(qs)->len == 0) return;
   /* Node's falsy rule: undefined/null/'' all mean the default. */
-  const char *sep_b = (sep && sep->len) ? sep->data : "&";
-  size_t sep_len = (sep && sep->len) ? sep->len : 1;
-  const char *eq_b = (eq && eq->len) ? eq->data : "=";
-  size_t eq_len = (eq && eq->len) ? eq->len : 1;
+  const char *sep_b = (sep && scr_str_flat_view(sep)->len) ? scr_str_flat_view(sep)->data : "&";
+  size_t sep_len = (sep && scr_str_flat_view(sep)->len) ? scr_str_flat_view(sep)->len : 1;
+  const char *eq_b = (eq && scr_str_flat_view(eq)->len) ? scr_str_flat_view(eq)->data : "=";
+  size_t eq_len = (eq && scr_str_flat_view(eq)->len) ? scr_str_flat_view(eq)->len : 1;
 
   /* pairs: Node's `maxKeys > 0 ? maxKeys : -1` as a double so Infinity
    * decrements forever, exactly like Node's -1 sentinel. */
   double pairs = max_keys > 0 ? max_keys : -1;
 
-  const char *p = qs->data;
-  size_t n = qs->len;
+  const char *p = scr_str_flat_view(qs)->data;
+  size_t n = scr_str_flat_view(qs)->len;
   QsBuf key, value;
   qb_init(&key);
   qb_init(&value);
@@ -467,8 +467,8 @@ ScrDyn *scr_qs_parse_dyn(const ScrStr *qs) {
   ScrDyn *out = scr_dyn_new_obj_null_proto();
   for (size_t i = 0; i < keys->v.arr.len; i++) {
     const ScrStr *k = keys->v.arr.items[i]->v.str;
-    ScrDyn *v = scr_dyn_obj_get(sink.obj, k->data, k->len);
-    scr_dyn_obj_set(out, k->data, k->len, scr_dyn_retain(v));
+    ScrDyn *v = scr_dyn_obj_get(sink.obj, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
+    scr_dyn_obj_set(out, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len, scr_dyn_retain(v));
   }
   scr_dyn_release(keys);
   scr_dyn_release(sink.obj);
@@ -520,10 +520,10 @@ ScrStr *scr_qs_stringify(const ScrDyn *obj, const ScrStr *sep,
     scr_dyn_release(view);
     return result;
   }
-  const char *sep_b = (sep && sep->len) ? sep->data : "&";
-  size_t sep_len = (sep && sep->len) ? sep->len : 1;
-  const char *eq_b = (eq && eq->len) ? eq->data : "=";
-  size_t eq_len = (eq && eq->len) ? eq->len : 1;
+  const char *sep_b = (sep && scr_str_flat_view(sep)->len) ? scr_str_flat_view(sep)->data : "&";
+  size_t sep_len = (sep && scr_str_flat_view(sep)->len) ? scr_str_flat_view(sep)->len : 1;
+  const char *eq_b = (eq && scr_str_flat_view(eq)->len) ? scr_str_flat_view(eq)->data : "=";
+  size_t eq_len = (eq && scr_str_flat_view(eq)->len) ? scr_str_flat_view(eq)->len : 1;
   if (!obj || obj->kind != SCR_DYN_OBJ) return scr_str_new("", 0);
 
   QsBuf fields;
@@ -533,7 +533,7 @@ ScrStr *scr_qs_stringify(const ScrDyn *obj, const ScrStr *sep,
   for (size_t i = 0; i < keys->v.arr.len; i++) {
     const ScrDyn *kd = keys->v.arr.items[i];
     const ScrStr *k = kd->v.str;
-    const ScrDyn *v = scr_dyn_obj_get(obj, k->data, k->len);
+    const ScrDyn *v = scr_dyn_obj_get(obj, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
     if (!v) continue; /* unreachable: keys came from the object */
     ScrDyn *view = v->kind == SCR_DYN_TYPED_REF ? scr_dyn_typed_ref_materialize(v) : NULL;
     if (view) v = view;

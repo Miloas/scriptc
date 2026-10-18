@@ -47,7 +47,16 @@ export function literalEqualityDefinition(
   literal: string,
   sizeType: "i32" | "i64",
   attrs: string,
+  quickjsStrings = false,
 ): string[] {
+  if (quickjsStrings)
+    return [
+      `define internal zeroext i1 ${name}(ptr %s) ${attrs} {`,
+      `entry:`,
+      `  %eq = call zeroext i1 @scr_str_eq(ptr %s, ptr ${literal})`,
+      `  ret i1 %eq`,
+      `}`,
+    ];
   const lines = [
     `define internal zeroext i1 ${name}(ptr %s) ${attrs} {`,
     `entry:`,

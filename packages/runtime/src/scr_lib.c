@@ -355,8 +355,8 @@ static void scr_lib_prepare_utf8_argv(void) {
 bool scr_lib_should_collapse_reexec_arg(ScrStr *cmd, ScrArr *args) {
   if (scr_lib_arg_count() < 1 || scr_arr_len(args) < 1) return false;
   ScrStr *first = (ScrStr *)scr_arr_get_ref(args, 0);
-  bool collapse = scr_lib_same_executable_arg(cmd->data, scr_lib_argv[0]) &&
-                  scr_lib_same_executable_arg(first->data, scr_lib_argv[0]);
+  bool collapse = scr_lib_same_executable_arg(scr_str_flat_view(cmd)->data, scr_lib_argv[0]) &&
+                  scr_lib_same_executable_arg(scr_str_flat_view(first)->data, scr_lib_argv[0]);
   scr_str_release(first);
   return collapse;
 }
@@ -530,8 +530,8 @@ bool scr_module_loaded(double module_id) {
 }
 
 static bool scr_module_filename_equal(const ScrModuleRecord *m, const ScrStr *filename) {
-  return m->filename && m->filename->len == filename->len &&
-         memcmp(m->filename->data, filename->data, filename->len) == 0;
+  return m->filename && scr_str_flat_view(m->filename)->len == scr_str_flat_view(filename)->len &&
+         memcmp(scr_str_flat_view(m->filename)->data, scr_str_flat_view(filename)->data, scr_str_flat_view(filename)->len) == 0;
 }
 
 double scr_module_cache_get(ScrStr *filename) {
@@ -766,7 +766,7 @@ ScrStr *scr_process_exec_path(void) {
 ScrStr *scr_env_get(const ScrStr *name) {
 #ifdef SCR_WORKERS
   if (!scr_context_is_main()) {
-    const char *value = scr_context_getenv(name->data);
+    const char *value = scr_context_getenv(scr_str_flat_view(name)->data);
     return value ? scr_str_new(value, strlen(value)) : NULL;
   }
 #endif
@@ -789,7 +789,7 @@ ScrStr *scr_env_get(const ScrStr *name) {
   free(buf);
   return s;
 #else
-  const char *v = scr_getenv(name->data);
+  const char *v = scr_getenv(scr_str_flat_view(name)->data);
   return v ? scr_str_new(v, strlen(v)) : NULL;
 #endif
 }
@@ -821,7 +821,7 @@ const char *scr_node_debug_initial(void) {
 }
 
 static void scr_node_debug_capture(const ScrStr *name) {
-  if (name->len == 10 && memcmp(name->data, "NODE_DEBUG", 10) == 0) (void)scr_node_debug_initial();
+  if (scr_str_flat_view(name)->len == 10 && memcmp(scr_str_flat_view(name)->data, "NODE_DEBUG", 10) == 0) (void)scr_node_debug_initial();
 }
 
 /* Counts writes and deletes of process.env.TZ. The local-time getters keep
@@ -837,7 +837,7 @@ static unsigned scr_date_tz_generation;
 static void scr_env_tz_changed(const ScrStr *name) {
   /* Compared by character: a string literal would join the merged
    * read-only strings of every program that links this file. */
-  if (name->len != 2 || name->data[0] != 'T' || name->data[1] != 'Z') return;
+  if (scr_str_flat_view(name)->len != 2 || scr_str_flat_view(name)->data[0] != 'T' || scr_str_flat_view(name)->data[1] != 'Z') return;
 #if !defined(_WIN32) && !defined(__wasi__)
   tzset();
 #endif
@@ -875,12 +875,12 @@ done:
 void scr_env_unset(const ScrStr *name) {
   scr_node_debug_capture(name);
 #ifdef SCR_WORKERS
-  if (scr_context_env_set(name->data, NULL)) return;
+  if (scr_context_env_set(scr_str_flat_view(name)->data, NULL)) return;
 #endif
 #ifdef _WIN32
   SetEnvironmentVariableA(name->data, NULL);
 #else
-  unsetenv(name->data);
+  unsetenv(scr_str_flat_view(name)->data);
 #endif
   scr_env_tz_changed(name);
 }
@@ -922,10 +922,10 @@ static int scr_env_entry_order(const void *left, const void *right) {
 }
 
 static ScrDyn *scr_env_parse_content(const ScrStr *input, bool ordinary) {
-  char *text = malloc(input->len + 1);
+  char *text = malloc(scr_str_flat_view(input)->len + 1);
   if (!text) scr_trap("scriptc: out of memory\n");
   size_t end = 0;
-  for (size_t i = 0; i < input->len; i++) if (input->data[i] != '\r') text[end++] = input->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(input)->len; i++) if (scr_str_flat_view(input)->data[i] != '\r') text[end++] = scr_str_flat_view(input)->data[i];
   text[end] = '\0';
   size_t pos = 0;
   scr_env_trim(text, &pos, &end);
@@ -1007,8 +1007,8 @@ static ScrDyn *scr_env_parse_content(const ScrStr *input, bool ordinary) {
     /* Convert sorted entries to JS strings after parsing. */
     ScrStr *key = scr_str_from_utf8_lossy((const uint8_t *)entry->key, entry->key_len);
     const ScrStr *raw = entry->value->v.str;
-    ScrStr *value = scr_str_from_utf8_lossy((const uint8_t *)raw->data, raw->len);
-    scr_dyn_obj_set(result, key->data, key->len, scr_dyn_new_str(value));
+    ScrStr *value = scr_str_from_utf8_lossy((const uint8_t *)scr_str_flat_view(raw)->data, scr_str_flat_view(raw)->len);
+    scr_dyn_obj_set(result, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len, scr_dyn_new_str(value));
     scr_str_release(key);
     scr_str_release(value);
   }
@@ -1064,7 +1064,7 @@ void scr_fs_invalid_named_path(const ScrDyn *value, const ScrStr *path, const ch
     scr_str_release(shown);
   }
   ScrStr *message = scr_jb_finish(&b);
-  scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_VALUE");
+  scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_VALUE");
   scr_str_release(message);
 }
 
@@ -1073,7 +1073,7 @@ void scr_fs_invalid_path(const ScrDyn *value, const ScrStr *path) {
 }
 
 bool scr_fs_path_ok(const ScrStr *path, const char *name) {
-  if (!memchr(path->data, 0, path->len)) return true;
+  if (!memchr(scr_str_flat_view(path)->data, 0, scr_str_flat_view(path)->len)) return true;
   scr_fs_invalid_named_path(NULL, path, name);
   return false;
 }
@@ -1089,7 +1089,7 @@ void scr_process_load_env_file(const ScrDyn *value) {
     return;
   }
   if (!path) return;
-  if (memchr(path->data, 0, path->len)) {
+  if (memchr(scr_str_flat_view(path)->data, 0, scr_str_flat_view(path)->len)) {
     scr_fs_invalid_path(value, path);
     scr_str_release(path);
     return;
@@ -1108,7 +1108,7 @@ void scr_process_load_env_file(const ScrDyn *value) {
     ScrStr *existing = scr_env_get(key);
     if (!existing) {
       const ScrStr *raw = entry->value->v.str;
-      ScrStr *value = scr_str_from_utf8_lossy((const uint8_t *)raw->data, raw->len);
+      ScrStr *value = scr_str_from_utf8_lossy((const uint8_t *)scr_str_flat_view(raw)->data, scr_str_flat_view(raw)->len);
       scr_env_set(key, value);
       scr_str_release(value);
     }
@@ -1243,7 +1243,7 @@ static int scr_signal_by_name(const char *name) {
 /* The table above for other units (scr_child.c's child.kill shares Node's
  * one signal-name story): the resolved number, or -1 for unknown names. */
 int scr_signal_from_name(const ScrStr *signal) {
-  return strlen(signal->data) == signal->len ? scr_signal_by_name(signal->data) : -1;
+  return strlen(scr_str_flat_view(signal)->data) == scr_str_flat_view(signal)->len ? scr_signal_by_name(scr_str_flat_view(signal)->data) : -1;
 }
 
 /* The reverse walk, for spawnSync's result.signal: the FIRST name with
@@ -1380,15 +1380,15 @@ bool scr_process_kill(double pid, double signum) {
 
 bool scr_process_kill_named(double pid, const ScrStr *signal) {
   if (!scr_kill_pid_check(pid)) return false;
-  int sig = scr_signal_by_name(signal->data);
+  int sig = scr_signal_by_name(scr_str_flat_view(signal)->data);
   if (sig < 0) {
     /* Node's ERR_UNKNOWN_SIGNAL TypeError. */
-    size_t cap = 16 + signal->len + 1;
+    size_t cap = 16 + scr_str_flat_view(signal)->len + 1;
     char *msg = malloc(cap);
     if (!msg) {
       scr_trap("scriptc: out of memory\n");
     }
-    int len = snprintf(msg, cap, "Unknown signal: %s", signal->data);
+    int len = snprintf(msg, cap, "Unknown signal: %s", scr_str_flat_view(signal)->data);
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)len);
     free(msg);
     return false;
@@ -2702,7 +2702,7 @@ void scr_process_set_title(const ScrStr *title) {
   /* Node passes the title through Utf8Value: lone surrogates become
    * U+FFFD, and the C string ends at the first NUL. */
   ScrStr *text = scr_str_to_well_formed((ScrStr *)title);
-  size_t len = strnlen(text->data, text->len);
+  size_t len = strnlen(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
 #if defined(_WIN32)
   int units = MultiByteToWideChar(CP_UTF8, 0, text->data, (int)len, NULL, 0);
   WCHAR *wide = calloc((size_t)units + 1, sizeof(WCHAR));
@@ -2726,7 +2726,7 @@ void scr_process_set_title(const ScrStr *title) {
   if (scr_title_area) {
     scr_title_move_args();
     if (len >= scr_title_cap) len = scr_title_cap ? scr_title_cap - 1 : 0;
-    memcpy(scr_title_area, text->data, len);
+    memcpy(scr_title_area, scr_str_flat_view(text)->data, len);
     memset(scr_title_area + len, 0, scr_title_cap - len);
     scr_title_len = len;
 #if defined(__linux__)
@@ -2916,7 +2916,7 @@ void scr_process_chdir(ScrStr *dir) {
   free(wide);
   if (!changed) scr_fs_throw(scr_fs_win_errno(error), "chdir", dir);
 #else
-  if (chdir(dir->data) != 0) scr_fs_throw(errno, "chdir", dir);
+  if (chdir(scr_str_flat_view(dir)->data) != 0) scr_fs_throw(errno, "chdir", dir);
 #endif
 }
 
@@ -3029,7 +3029,7 @@ static const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
 #else
 static const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
   (void)buf;
-  return path->data;
+  return scr_str_flat_view(path)->data;
 }
 #endif
 
@@ -3114,10 +3114,10 @@ void scr_fs_throw_errno_exception(int e, const char *syscall, const ScrStr *path
   char namebuf[16];
   const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
   const char *text = strerror(e);
-  size_t cap = strlen(name) + strlen(text) + (path ? path->len : 0) + 8;
+  size_t cap = strlen(name) + strlen(text) + (path ? scr_str_flat_view(path)->len : 0) + 8;
   char *msg = malloc(cap);
   if (!msg) scr_trap("scriptc: out of memory\n");
-  int len = path ? snprintf(msg, cap, "%s, %s '%s'", name, text, path->data) : snprintf(msg, cap, "%s, %s", name, text);
+  int len = path ? snprintf(msg, cap, "%s, %s '%s'", name, text, scr_str_flat_view(path)->data) : snprintf(msg, cap, "%s, %s", name, text);
   ScrStr *message = scr_str_new(msg, (size_t)len);
   free(msg);
   ScrError *error = scr_error_new(SCR_ERR_ERROR, message);
@@ -3138,11 +3138,11 @@ void scr_fs_throw_system_error(const char *code, const char *prefix, int e, cons
                                const ScrStr *message, const ScrStr *path) {
   char namebuf[16];
   const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
-  size_t cap = strlen(prefix) + strlen(syscall) + strlen(name) + message->len + (path ? path->len : 0) + 32;
+  size_t cap = strlen(prefix) + strlen(syscall) + strlen(name) + scr_str_flat_view(message)->len + (path ? scr_str_flat_view(path)->len : 0) + 32;
   char *msg = malloc(cap);
   if (!msg) scr_trap("scriptc: out of memory\n");
-  int len = snprintf(msg, cap, "%s: %s returned %s (%s)", prefix, syscall, name, message->data);
-  if (path) len += snprintf(msg + len, cap - (size_t)len, " %s", path->data);
+  int len = snprintf(msg, cap, "%s: %s returned %s (%s)", prefix, syscall, name, scr_str_flat_view(message)->data);
+  if (path) len += snprintf(msg + len, cap - (size_t)len, " %s", scr_str_flat_view(path)->data);
   ScrStr *text = scr_str_new(msg, (size_t)len);
   free(msg);
   ScrError *error = scr_error_new(SCR_ERR_ERROR, text);
@@ -3175,7 +3175,7 @@ static FILE *scr_fs_fopen(const ScrStr *path, const char *mode) {
   errno = error;
   return file;
 #else
-  return fopen(path->data, mode);
+  return fopen(scr_str_flat_view(path)->data, mode);
 #endif
 }
 
@@ -3209,7 +3209,7 @@ static size_t scr_file_read_hint(FILE *stream, int fd) {
 }
 
 static uint8_t *scr_file_read_data(ScrFileRead *out) {
-  return out->text ? (uint8_t *)out->text->data : out->bytes;
+  return out->text ? (uint8_t *)scr_str_flat_view(out->text)->data : out->bytes;
 }
 
 static void scr_file_read_grow(ScrFileRead *out) {
@@ -3217,7 +3217,7 @@ static void scr_file_read_grow(ScrFileRead *out) {
   if (out->cap >= limit) scr_trap("scriptc: file too large\n");
   size_t cap = out->cap > limit / 2 ? limit : out->cap * 2;
   if (out->text) {
-    out->text->len = out->len;
+    scr_str_flat_view(out->text)->len = out->len;
     out->text = scr_str_regrow(out->text, cap);
   } else {
     uint8_t *grown = realloc(out->bytes, cap);
@@ -3235,7 +3235,7 @@ static int scr_file_read_all(FILE *stream, int fd, bool text, ScrFileRead *out) 
   if (text) {
     out->text = scr_str_alloc_raw(0, out->cap);
     out->cap = out->text->cap;
-    out->text->data[0] = '\0';
+    scr_str_flat_view(out->text)->data[0] = '\0';
   } else {
     out->bytes = malloc(out->cap);
     if (!out->bytes) scr_trap("scriptc: out of memory\n");
@@ -3274,7 +3274,7 @@ static int scr_file_read_all(FILE *stream, int fd, bool text, ScrFileRead *out) 
     }
     if (error) {
       /* Raw strings must be safe for the normal cache-aware destructor. */
-      if (out->text) { out->text->len = out->len; out->text->data[out->len] = '\0'; }
+      if (out->text) { scr_str_flat_view(out->text)->len = out->len; scr_str_flat_view(out->text)->data[out->len] = '\0'; }
       scr_str_release(out->text);
       free(out->bytes);
       *out = (ScrFileRead){0};
@@ -3282,7 +3282,7 @@ static int scr_file_read_all(FILE *stream, int fd, bool text, ScrFileRead *out) 
     }
     if (!count) break;
   }
-  if (out->text) { out->text->len = out->len; out->text->data[out->len] = '\0'; }
+  if (out->text) { scr_str_flat_view(out->text)->len = out->len; scr_str_flat_view(out->text)->data[out->len] = '\0'; }
   // Do not retain a large hint after truncation or a tiny pipe result.
   if (out->cap > 256 && out->len < out->cap / 2) {
     if (out->text) out->text = scr_str_regrow(out->text, out->len);
@@ -3311,7 +3311,7 @@ static ScrStr *scr_fs_read_file_core(ScrStr *path, bool env_file, size_t *ascii)
       scr_jb_put_str(&b, path);
       scr_jb_puts(&b, "' should be a valid string.");
       ScrStr *message = scr_jb_finish(&b);
-      scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_TYPE");
+      scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_TYPE");
       scr_str_release(message);
     } else scr_fs_throw(error, "read", path);
     return NULL;
@@ -3409,7 +3409,7 @@ static ScrStr *scr_fs_realpath_common(ScrStr *path, const char *op) {
   return result;
 #else
   char buf[PATH_MAX];
-  if (realpath(path->data, buf) == NULL) {
+  if (realpath(scr_str_flat_view(path)->data, buf) == NULL) {
     scr_fs_throw(errno, op, path);
     return NULL;
   }
@@ -3434,7 +3434,7 @@ static void scr_fs_write_common(ScrStr *path, ScrStr *data, const char *mode) {
   }
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  if (data->len > 0 && fwrite(bytes, 1, data->len, f) != data->len) {
+  if (scr_str_flat_view(data)->len > 0 && fwrite(bytes, 1, scr_str_flat_view(data)->len, f) != scr_str_flat_view(data)->len) {
     int e = errno;
     fclose(f);
     scr_str_utf8_end(owned);
@@ -3473,7 +3473,7 @@ void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
   }
   /* O_BINARY: zero on POSIX; on Windows it keeps the CRT from translating
    * \n in these byte-exact writes (fopen's "wb" path already does). */
-  int fd = open(path->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, (mode_t)mode);
+  int fd = open(scr_str_flat_view(path)->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, (mode_t)mode);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return;
@@ -3481,8 +3481,8 @@ void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
   size_t at = 0;
-  while (at < data->len) {
-    ssize_t wrote = write(fd, bytes + at, data->len - at);
+  while (at < scr_str_flat_view(data)->len) {
+    ssize_t wrote = write(fd, bytes + at, scr_str_flat_view(data)->len - at);
     if (wrote < 0) {
       if (errno == EINTR) continue;
       int e = errno;
@@ -3504,13 +3504,13 @@ void scr_fs_append_file(ScrStr *path, ScrStr *data) {
 bool scr_fs_exists(ScrStr *path) {
   /* Like Node's existsSync: any failure (missing, EACCES on a parent, a
    * path with a null byte, ...) is simply false — never a throw. */
-  if (memchr(path->data, 0, path->len)) return false;
-  return access(path->data, F_OK) == 0;
+  if (memchr(scr_str_flat_view(path)->data, 0, scr_str_flat_view(path)->len)) return false;
+  return access(scr_str_flat_view(path)->data, F_OK) == 0;
 }
 
 void scr_fs_mkdir(ScrStr *path) {
   if (!scr_fs_path_ok(path, "path")) return;
-  if (scr_sys_mkdir(path->data, 0777) != 0) scr_fs_throw(errno, "mkdir", path);
+  if (scr_sys_mkdir(scr_str_flat_view(path)->data, 0777) != 0) scr_fs_throw(errno, "mkdir", path);
 }
 
 /* mkdirSync(p, { mode }) non-recursive: mkdir(2) with the explicit mode
@@ -3518,7 +3518,7 @@ void scr_fs_mkdir(ScrStr *path) {
  * Windows has no directory modes and drops it, like Node there). */
 void scr_fs_mkdir_mode(ScrStr *path, double mode) {
   if (!scr_fs_path_ok(path, "path")) return;
-  if (scr_sys_mkdir(path->data, (mode_t)mode) != 0) scr_fs_throw(errno, "mkdir", path);
+  if (scr_sys_mkdir(scr_str_flat_view(path)->data, (mode_t)mode) != 0) scr_fs_throw(errno, "mkdir", path);
 }
 
 #ifdef _WIN32
@@ -3561,12 +3561,12 @@ void scr_fs_unlink(ScrStr *path) {
   int link = scr_fs_win_remove_link(path->data, path->len);
   if (link != 0) { if (link < 0) scr_fs_throw(errno, "unlink", path); return; }
 #endif
-  if (unlink(path->data) != 0) scr_fs_throw(errno, "unlink", path);
+  if (unlink(scr_str_flat_view(path)->data) != 0) scr_fs_throw(errno, "unlink", path);
 }
 
 void scr_fs_chmod(ScrStr *path, double mode) {
   if (!scr_fs_path_ok(path, "path")) return;
-  if (chmod(path->data, (mode_t)mode) != 0) scr_fs_throw(errno, "chmod", path);
+  if (chmod(scr_str_flat_view(path)->data, (mode_t)mode) != 0) scr_fs_throw(errno, "chmod", path);
 }
 
 static void scr_fs_throw_nopath(int e, const char *op);
@@ -3601,7 +3601,7 @@ static void scr_fs_chown_op(ScrStr *path, double fd, bool no_follow, double uid,
   gid_t group = (gid_t)(int64_t)gid;
   if (!path) {
     if (fchown((int)fd, owner, group) != 0) scr_fs_throw_nopath(errno, "fchown");
-  } else if ((no_follow ? lchown(path->data, owner, group) : chown(path->data, owner, group)) != 0) {
+  } else if ((no_follow ? lchown(scr_str_flat_view(path)->data, owner, group) : chown(scr_str_flat_view(path)->data, owner, group)) != 0) {
     scr_fs_throw(errno, no_follow ? "lchown" : "chown", path);
   }
 #endif
@@ -3619,7 +3619,7 @@ void scr_fs_fchown(double fd, double uid, double gid) { scr_fs_chown_op(NULL, fd
  * third argument is a compile fence). */
 double scr_fs_open(ScrStr *path, ScrStr *flags) {
   if (!scr_fs_path_ok(path, "path")) return 0;
-  const char *f = flags->data;
+  const char *f = scr_str_flat_view(flags)->data;
   int of;
   if (strcmp(f, "r") == 0) of = O_RDONLY;
   else if (strcmp(f, "rs") == 0 || strcmp(f, "sr") == 0) of = O_RDONLY | O_SYNC;
@@ -3641,7 +3641,7 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)len);
     return 0;
   }
-  int fd = open(path->data, of | O_BINARY, 0666);
+  int fd = open(scr_str_flat_view(path)->data, of | O_BINARY, 0666);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return 0;
@@ -3676,7 +3676,7 @@ double scr_fs_open_numeric(ScrStr *path, double flags, double mode) {
   if (bits & 16) native |= O_NOFOLLOW;
   if (bits & 32) native |= O_NONBLOCK;
 #endif
-  int fd = open(path->data, native | O_BINARY, (mode_t)mode);
+  int fd = open(scr_str_flat_view(path)->data, native | O_BINARY, (mode_t)mode);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return 0;
@@ -3695,7 +3695,7 @@ double scr_fs_open_native(ScrStr *path, double flags, double mode) {
   int fd = _wopen(wide, (int)flags | O_BINARY, (int)mode);
   free(wide);
 #else
-  int fd = open(path->data, (int)flags | O_BINARY, (mode_t)mode);
+  int fd = open(scr_str_flat_view(path)->data, (int)flags | O_BINARY, (mode_t)mode);
 #endif
   if (fd < 0) { scr_fs_throw(errno, "open", path); return 0; }
   return (double)fd;
@@ -3830,7 +3830,7 @@ void scr_fs_utimes(ScrStr *path, double atime, double mtime, bool nofollow) {
 #else
   struct timespec times[2];
   if (!scr_fs_timespec(atime, &times[0]) || !scr_fs_timespec(mtime, &times[1])) { scr_fs_throw(EINVAL, op, path); return; }
-  if (utimensat(AT_FDCWD, path->data, times, nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0) scr_fs_throw(errno, op, path);
+  if (utimensat(AT_FDCWD, scr_str_flat_view(path)->data, times, nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0) scr_fs_throw(errno, op, path);
 #endif
 }
 
@@ -4155,7 +4155,7 @@ double scr_fs_write_str_sync(double fd, ScrStr *data, double position,
   (void)encoding; /* frontend proves utf8; the argument still evaluates */
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  double wrote = scr_fs_write_bytes(fd, bytes, data->len, position);
+  double wrote = scr_fs_write_bytes(fd, bytes, scr_str_flat_view(data)->len, position);
   scr_str_utf8_end(owned);
   return wrote;
 }
@@ -4402,7 +4402,7 @@ void scr_fs_link(ScrStr *source, ScrStr *dest) {
   free(from); free(to);
   if (!ok) scr_fs_throw2(scr_fs_win_errno(error), "link", source, dest);
 #else
-  if (link(source->data, dest->data) != 0) scr_fs_throw2(errno, "link", source, dest);
+  if (link(scr_str_flat_view(source)->data, scr_str_flat_view(dest)->data) != 0) scr_fs_throw2(errno, "link", source, dest);
 #endif
 }
 
@@ -4414,7 +4414,7 @@ void scr_fs_link(ScrStr *source, ScrStr *dest) {
 void scr_fs_copyfile(ScrStr *src, ScrStr *dest) {
   if (!scr_fs_path_ok(src, "src")) return;
   if (!scr_fs_path_ok(dest, "dest")) return;
-  int in = open(src->data, O_RDONLY | O_BINARY);
+  int in = open(scr_str_flat_view(src)->data, O_RDONLY | O_BINARY);
   if (in < 0) {
     scr_fs_throw2(errno, "copyfile", src, dest);
     return;
@@ -4426,7 +4426,7 @@ void scr_fs_copyfile(ScrStr *src, ScrStr *dest) {
     scr_fs_throw2(e, "copyfile", src, dest);
     return;
   }
-  int out = open(dest->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode & 07777);
+  int out = open(scr_str_flat_view(dest)->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode & 07777);
   if (out < 0) {
     int e = errno;
     close(in);
@@ -4557,7 +4557,7 @@ int scr_fs_rename_raw(const ScrStr *oldpath, const ScrStr *newpath) {
   free(newwide);
   return ok ? 0 : scr_fs_win_errno(error);
 #else
-  return rename(oldpath->data, newpath->data) == 0 ? 0 : errno;
+  return rename(scr_str_flat_view(oldpath)->data, scr_str_flat_view(newpath)->data) == 0 ? 0 : errno;
 #endif
 }
 
@@ -4585,7 +4585,7 @@ void scr_fs_rm(ScrStr *path) {
    * surface doesn't declare — the message wording diverges from Node's
    * ERR_FS_EISDIR, see SEMANTICS.md), then unlink. */
   struct stat st;
-  if (lstat(path->data, &st) != 0) {
+  if (lstat(scr_str_flat_view(path)->data, &st) != 0) {
     scr_fs_throw(errno, "lstat", path);
     return;
   }
@@ -4593,12 +4593,12 @@ void scr_fs_rm(ScrStr *path) {
     scr_fs_throw(EISDIR, "rm", path);
     return;
   }
-  if (scr_rm_unlink(path->data, path->len) != 0) scr_fs_throw(errno, "unlink", path);
+  if (scr_rm_unlink(scr_str_flat_view(path)->data, scr_str_flat_view(path)->len) != 0) scr_fs_throw(errno, "unlink", path);
 }
 
 void scr_fs_rmdir(ScrStr *path) {
   if (!scr_fs_path_ok(path, "path")) return;
-  if (rmdir(path->data) != 0) scr_fs_throw(errno, "rmdir", path);
+  if (rmdir(scr_str_flat_view(path)->data) != 0) scr_fs_throw(errno, "rmdir", path);
 }
 
 /* ── fs option forms ─────────────────────────────────────────────────
@@ -4666,12 +4666,12 @@ static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
 
 void scr_fs_mkdir_recursive(ScrStr *path) {
   if (!scr_fs_path_ok(path, "path")) return;
-  char *buf = malloc(path->len + 1);
+  char *buf = malloc(scr_str_flat_view(path)->len + 1);
   if (!buf) {
     scr_trap("scriptc: out of memory\n");
   }
-  memcpy(buf, path->data, path->len + 1); /* ScrStr data is NUL-terminated */
-  scr_mkdir_rec(buf, path->len, 0777);
+  memcpy(buf, scr_str_flat_view(path)->data, scr_str_flat_view(path)->len + 1); /* ScrStr data is NUL-terminated */
+  scr_mkdir_rec(buf, scr_str_flat_view(path)->len, 0777);
   free(buf);
 }
 
@@ -4679,12 +4679,12 @@ void scr_fs_mkdir_recursive(ScrStr *path) {
  * directory the walk creates (existing ones keep theirs). */
 void scr_fs_mkdir_recursive_mode(ScrStr *path, double mode) {
   if (!scr_fs_path_ok(path, "path")) return;
-  char *buf = malloc(path->len + 1);
+  char *buf = malloc(scr_str_flat_view(path)->len + 1);
   if (!buf) {
     scr_trap("scriptc: out of memory\n");
   }
-  memcpy(buf, path->data, path->len + 1);
-  scr_mkdir_rec(buf, path->len, (mode_t)mode);
+  memcpy(buf, scr_str_flat_view(path)->data, scr_str_flat_view(path)->len + 1);
+  scr_mkdir_rec(buf, scr_str_flat_view(path)->len, (mode_t)mode);
   free(buf);
 }
 
@@ -4707,12 +4707,12 @@ static bool scr_fs_mkdirp_exists(char *buf, size_t len) {
 
 ScrStr *scr_fs_mkdir_recursive_first(ScrStr *path, double mode) {
   if (!scr_fs_path_ok(path, "path")) return NULL;
-  char *buf = malloc(path->len + 1);
+  char *buf = malloc(scr_str_flat_view(path)->len + 1);
   if (!buf) {
     scr_trap("scriptc: out of memory\n");
   }
-  memcpy(buf, path->data, path->len + 1);
-  size_t cur = path->len, first = 0;
+  memcpy(buf, scr_str_flat_view(path)->data, scr_str_flat_view(path)->len + 1);
+  size_t cur = scr_str_flat_view(path)->len, first = 0;
   while (cur > 0 && !scr_fs_mkdirp_exists(buf, cur)) {
     first = cur;
     /* The kernel's parent: trailing separators dropped, then the last
@@ -4728,10 +4728,10 @@ ScrStr *scr_fs_mkdir_recursive_first(ScrStr *path, double mode) {
     if (cut == 0) break;
     cur = cut - 1;
   }
-  scr_mkdir_rec(buf, path->len, (mode_t)mode);
+  scr_mkdir_rec(buf, scr_str_flat_view(path)->len, (mode_t)mode);
   free(buf);
   if (scr_exc_pending() || first == 0) return NULL;
-  return scr_str_new(path->data, first);
+  return scr_str_new(scr_str_flat_view(path)->data, first);
 }
 
 /* First failure of an rm walk, recorded instead of thrown so the retry
@@ -4832,22 +4832,22 @@ static void scr_fs_rm_attempt(ScrStr *path, bool recursive, bool force, ScrRmFai
   if (link != 0) { if (link < 0) scr_rm_fail_set(f, errno, "unlink", path->data, path->len); return; }
 #endif
   struct stat st;
-  if (lstat(path->data, &st) != 0) {
+  if (lstat(scr_str_flat_view(path)->data, &st) != 0) {
     if (force && errno == ENOENT) return; /* Node: force swallows ENOENT */
-    scr_rm_fail_set(f, errno, "lstat", path->data, path->len);
+    scr_rm_fail_set(f, errno, "lstat", scr_str_flat_view(path)->data, scr_str_flat_view(path)->len);
     return;
   }
   if (S_ISDIR(st.st_mode)) {
     if (!recursive) {
       /* Node throws ERR_FS_EISDIR here; the EISDIR-prefixed wording is
        * divergence 13's documented difference. */
-      scr_rm_fail_set(f, EISDIR, "rm", path->data, path->len);
+      scr_rm_fail_set(f, EISDIR, "rm", scr_str_flat_view(path)->data, scr_str_flat_view(path)->len);
       return;
     }
-    scr_rm_tree_e(path->data, path->len, f);
+    scr_rm_tree_e(scr_str_flat_view(path)->data, scr_str_flat_view(path)->len, f);
     return;
   }
-  if (scr_rm_unlink(path->data, path->len) != 0) scr_rm_fail_set(f, errno, "unlink", path->data, path->len);
+  if (scr_rm_unlink(scr_str_flat_view(path)->data, scr_str_flat_view(path)->len) != 0) scr_rm_fail_set(f, errno, "unlink", scr_str_flat_view(path)->data, scr_str_flat_view(path)->len);
 }
 
 void scr_fs_rm_opts(ScrStr *path, bool recursive, bool force) {
@@ -4919,22 +4919,22 @@ static char *scr_portable_mkdtemp(char *tmpl) {
  * name it tried; musl restores the X's). */
 static ScrStr *scr_fs_mkdtemp_op(ScrStr *prefix, bool sync) {
   if (!scr_fs_path_ok(prefix, "prefix")) return NULL;
-  char *tmpl = malloc(prefix->len + 7);
+  char *tmpl = malloc(scr_str_flat_view(prefix)->len + 7);
   if (!tmpl) {
     scr_trap("scriptc: out of memory\n");
   }
-  memcpy(tmpl, prefix->data, prefix->len);
-  memcpy(tmpl + prefix->len, "XXXXXX", 7);
+  memcpy(tmpl, scr_str_flat_view(prefix)->data, scr_str_flat_view(prefix)->len);
+  memcpy(tmpl + scr_str_flat_view(prefix)->len, "XXXXXX", 7);
   if (!mkdtemp(tmpl)) {
     int e = errno;
-    if (sync) memcpy(tmpl + prefix->len, "XXXXXX", 6);
-    ScrStr *shown = scr_str_new(tmpl, prefix->len + 6);
+    if (sync) memcpy(tmpl + scr_str_flat_view(prefix)->len, "XXXXXX", 6);
+    ScrStr *shown = scr_str_new(tmpl, scr_str_flat_view(prefix)->len + 6);
     scr_fs_throw(e, "mkdtemp", shown);
     scr_str_release(shown);
     free(tmpl);
     return NULL;
   }
-  ScrStr *out = scr_str_new(tmpl, prefix->len + 6);
+  ScrStr *out = scr_str_new(tmpl, scr_str_flat_view(prefix)->len + 6);
   free(tmpl);
   return out;
 }
@@ -4966,7 +4966,7 @@ void scr_fs_access(ScrStr *path, double mode) {
    * Windows treats X_OK as F_OK, so mask it down to the R/W bits. */
   m &= 6;
 #endif
-  if (access(path->data, m) != 0) scr_fs_throw(errno, "access", path);
+  if (access(scr_str_flat_view(path)->data, m) != 0) scr_fs_throw(errno, "access", path);
 }
 
 /* The no-path variant of the fs error shape — Node's fd reads report
@@ -5788,7 +5788,7 @@ void scr_fs_symlink(ScrStr *target, ScrStr *destination, int kind) {
   if (error) scr_fs_throw2(scr_fs_win_errno(error), "symlink", target, destination);
 #else
   (void)kind;
-  if (symlink(target->data, destination->data) != 0) scr_fs_throw2(errno, "symlink", target, destination);
+  if (symlink(scr_str_flat_view(target)->data, scr_str_flat_view(destination)->data) != 0) scr_fs_throw2(errno, "symlink", target, destination);
 #endif
 }
 
@@ -5853,7 +5853,7 @@ ScrDyn *scr_fs_statfs(ScrStr *path, bool bigint) {
 #else
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
   struct statfs snapshot;
-  if (statfs(path->data, &snapshot) != 0) { scr_fs_throw(errno, "statfs", path); return NULL; }
+  if (statfs(scr_str_flat_view(path)->data, &snapshot) != 0) { scr_fs_throw(errno, "statfs", path); return NULL; }
   fields[0] = (uint64_t)snapshot.f_type;
 #else
   struct statvfs snapshot;
@@ -5913,7 +5913,7 @@ ScrBytes *scr_fs_readlink_bytes(ScrStr *path) {
     uint8_t *grown = realloc(text, capacity);
     if (!grown) { free(text); scr_trap("scriptc: out of memory\n"); }
     text = grown;
-    ssize_t size = readlink(path->data, (char *)text, capacity);
+    ssize_t size = readlink(scr_str_flat_view(path)->data, (char *)text, capacity);
     if (size < 0) { int error = errno; free(text); scr_fs_throw(error, "readlink", path); return NULL; }
     if ((size_t)size < capacity) {
       ScrBytes *bytes = scr_bytes_from_data(text, (size_t)size);
@@ -5932,7 +5932,7 @@ ScrStats *scr_fs_stat(ScrStr *path) {
   return scr_stats_of_path(path, "stat", false);
 #else
   int error = 0;
-  ScrStats *s = scr_stats_posix(path->data, -1, false, &error); /* follows symlinks */
+  ScrStats *s = scr_stats_posix(scr_str_flat_view(path)->data, -1, false, &error); /* follows symlinks */
   if (!s) scr_fs_throw(error, "stat", path);
   return s;
 #endif
@@ -5944,7 +5944,7 @@ ScrStats *scr_fs_lstat(ScrStr *path) {
   return scr_stats_of_path(path, "lstat", true);
 #else
   int error = 0;
-  ScrStats *s = scr_stats_posix(path->data, -1, true, &error); /* no follow */
+  ScrStats *s = scr_stats_posix(scr_str_flat_view(path)->data, -1, true, &error); /* no follow */
   if (!s) scr_fs_throw(error, "lstat", path);
   return s;
 #endif
@@ -6318,9 +6318,9 @@ typedef struct {
 
 static int scr_fs_scandir_cmp(const void *a, const void *b) {
   const ScrStr *x = ((const ScrScandirEntry *)a)->name, *y = ((const ScrScandirEntry *)b)->name;
-  size_t n = x->len < y->len ? x->len : y->len;
-  int c = memcmp(x->data, y->data, n);
-  return c ? c : (x->len > y->len) - (x->len < y->len);
+  size_t n = scr_str_flat_view(x)->len < scr_str_flat_view(y)->len ? scr_str_flat_view(x)->len : scr_str_flat_view(y)->len;
+  int c = memcmp(scr_str_flat_view(x)->data, scr_str_flat_view(y)->data, n);
+  return c ? c : (scr_str_flat_view(x)->len > scr_str_flat_view(y)->len) - (scr_str_flat_view(x)->len < scr_str_flat_view(y)->len);
 }
 
 static void scr_fs_scandir_sort(ScrScandir *s) {
@@ -6417,7 +6417,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
 #ifdef _WIN32
   return scr_fs_scandir_windows(path);
 #else
-  DIR *d = opendir(path->data);
+  DIR *d = opendir(scr_str_flat_view(path)->data);
   if (!d) {
     scr_fs_throw(errno, "scandir", path); /* Node reports scandir */
     return NULL;
@@ -6448,7 +6448,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
       case DT_BLK: kind = 7; break;
       default: { /* DT_UNKNOWN: the lstat fallback */
         char buf[4096];
-        int w = snprintf(buf, sizeof buf, "%s/%s", path->data, ent->d_name);
+        int w = snprintf(buf, sizeof buf, "%s/%s", scr_str_flat_view(path)->data, ent->d_name);
         struct stat st;
         kind = (w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0)
                    ? scr_dirent_kind_of_mode(st.st_mode)
@@ -6648,7 +6648,7 @@ ScrDir *scr_fs_opendir(ScrStr *path, double buffer_size) {
     return NULL;
   }
 #else
-  d->stream = opendir(path->data);
+  d->stream = opendir(scr_str_flat_view(path)->data);
   if (!d->stream) {
     int error = errno;
     free(d);
@@ -6681,7 +6681,7 @@ static unsigned char scr_dir_entry_kind(const ScrDir *d, const struct dirent *en
   }
 #endif
   char buf[4096];
-  int w = snprintf(buf, sizeof buf, "%s/%s", d->path->data, ent->d_name);
+  int w = snprintf(buf, sizeof buf, "%s/%s", scr_str_flat_view(d->path)->data, ent->d_name);
   struct stat st;
   return w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0 ? scr_dirent_kind_of_mode(st.st_mode) : 0;
 }
@@ -6838,7 +6838,7 @@ ScrStr *scr_crypto_random_string(double n, ScrStr *enc) {
   }
   arc4random_buf(bytes, size);
   ScrStr *out;
-  if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
+  if (scr_str_flat_view(enc)->len == 3 && memcmp(scr_str_flat_view(enc)->data, "hex", 3) == 0) {
     static const char hex[] = "0123456789abcdef";
     char *buf = malloc(size * 2 + 1);
     if (!buf) {
@@ -7946,12 +7946,12 @@ static void scr_crypto_digest_unsupported(void) {
 static void scr_crypto_invalid_digest(const ScrStr *alg) {
   static const char prefix[] = "Invalid digest: ";
   const size_t prefix_len = sizeof prefix - 1;
-  if (alg->len > SIZE_MAX - prefix_len) scr_trap("scriptc: out of memory\n");
-  const size_t msg_len = prefix_len + alg->len;
+  if (scr_str_flat_view(alg)->len > SIZE_MAX - prefix_len) scr_trap("scriptc: out of memory\n");
+  const size_t msg_len = prefix_len + scr_str_flat_view(alg)->len;
   char *msg = malloc(msg_len);
   if (!msg) scr_trap("scriptc: out of memory\n");
   memcpy(msg, prefix, prefix_len);
-  memcpy(msg + prefix_len, alg->data, alg->len);
+  memcpy(msg + prefix_len, scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, msg_len,
                            "ERR_CRYPTO_INVALID_DIGEST");
   free(msg);
@@ -7962,16 +7962,16 @@ static void scr_crypto_hash_digest_unsupported(const ScrStr *alg) {
   static const char suffix[] = " is not supported";
   const size_t prefix_len = sizeof prefix - 1;
   const size_t suffix_len = sizeof suffix - 1;
-  if (alg->len > SIZE_MAX - prefix_len ||
-      suffix_len > SIZE_MAX - prefix_len - alg->len) {
+  if (scr_str_flat_view(alg)->len > SIZE_MAX - prefix_len ||
+      suffix_len > SIZE_MAX - prefix_len - scr_str_flat_view(alg)->len) {
     scr_trap("scriptc: out of memory\n");
   }
-  const size_t msg_len = prefix_len + alg->len + suffix_len;
+  const size_t msg_len = prefix_len + scr_str_flat_view(alg)->len + suffix_len;
   char *msg = malloc(msg_len);
   if (!msg) scr_trap("scriptc: out of memory\n");
   memcpy(msg, prefix, prefix_len);
-  memcpy(msg + prefix_len, alg->data, alg->len);
-  memcpy(msg + prefix_len + alg->len, suffix, suffix_len);
+  memcpy(msg + prefix_len, scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len);
+  memcpy(msg + prefix_len + scr_str_flat_view(alg)->len, suffix, suffix_len);
   scr_throw_error_msg(SCR_ERR_ERROR, msg, msg_len);
   free(msg);
 }
@@ -8039,7 +8039,7 @@ static ScrCryptoHash *scr_crypto_hash_alloc(ScrDigestAlg alg, bool hmac,
 
 ScrCryptoHash *scr_crypto_hash_new(ScrStr *alg) {
   ScrDigestAlg kind;
-  if (!scr_hash_alg(alg->data, alg->len, &kind)) {
+  if (!scr_hash_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) {
     scr_crypto_digest_unsupported();
     return NULL;
   }
@@ -8048,14 +8048,14 @@ ScrCryptoHash *scr_crypto_hash_new(ScrStr *alg) {
 
 ScrCryptoHash *scr_crypto_hmac_new_str(ScrStr *alg, ScrStr *key) {
   ScrDigestAlg kind;
-  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+  if (!scr_digest_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) {
     scr_crypto_invalid_digest(alg);
     return NULL;
   }
   if (!scr_crypto_hmac_digest_ok(kind)) return NULL;
   char *owned;
   const char *bytes = scr_str_utf8(key, &owned);
-  ScrCryptoHash *r = scr_crypto_hash_alloc(kind, true, (const unsigned char *)bytes, key->len);
+  ScrCryptoHash *r = scr_crypto_hash_alloc(kind, true, (const unsigned char *)bytes, scr_str_flat_view(key)->len);
   scr_str_utf8_end(owned);
   return r;
 }
@@ -8063,7 +8063,7 @@ ScrCryptoHash *scr_crypto_hmac_new_str(ScrStr *alg, ScrStr *key) {
 ScrCryptoHash *scr_crypto_hmac_new_bytes(ScrStr *alg, ScrBytes *key) {
   SCR_BYTES_SNAPSHOT(key);
   ScrDigestAlg kind;
-  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+  if (!scr_digest_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) {
     scr_crypto_invalid_digest(alg);
     return NULL;
   }
@@ -8303,7 +8303,7 @@ static ScrCryptoHash *scr_crypto_hash_update_raw(ScrCryptoHash *hash,
 ScrCryptoHash *scr_crypto_hash_update_str(ScrCryptoHash *hash, ScrStr *data) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  ScrCryptoHash *r = scr_crypto_hash_update_raw(hash, (const unsigned char *)bytes, data->len);
+  ScrCryptoHash *r = scr_crypto_hash_update_raw(hash, (const unsigned char *)bytes, scr_str_flat_view(data)->len);
   scr_str_utf8_end(owned);
   return r;
 }
@@ -8409,7 +8409,7 @@ static void scr_crypto_encoding_unlowered(void) {
 /* digest(encoding) where the compiler proved a string result: `enc` is a
  * Buffer encoding name. */
 ScrStr *scr_crypto_hash_digest_string(ScrCryptoHash *hash, ScrStr *enc) {
-  int encoding = scr_crypto_encoding(enc->data, enc->len);
+  int encoding = scr_crypto_encoding(scr_str_flat_view(enc)->data, scr_str_flat_view(enc)->len);
   if (encoding < 0) {
     if (hash->finalized && !hash->hmac) scr_crypto_hash_finalized();
     else if (hash->finalized) return scr_str_new("", 0);
@@ -8550,15 +8550,15 @@ ScrDyn *scr_crypto_hash_digest_dyn(ScrCryptoHash *hash, ScrDyn *enc) {
   if (hash->finalized) {
     /* Node answers Buffer.from("").toString(outputEncoding), or the
      * empty Buffer for a falsy encoding or "buffer". */
-    bool buffer = !truthy || (enc->kind == SCR_DYN_STR && enc->v.str->len == 6 &&
-                              memcmp(enc->v.str->data, "buffer", 6) == 0);
+    bool buffer = !truthy || (enc->kind == SCR_DYN_STR && scr_str_flat_view(enc->v.str)->len == 6 &&
+                              memcmp(scr_str_flat_view(enc->v.str)->data, "buffer", 6) == 0);
     return buffer ? scr_crypto_dyn_buffer(NULL, 0) : scr_crypto_dyn_str(scr_str_new("", 0));
   }
   int encoding = -1;
   if (truthy) {
     ScrStr *text = enc->kind == SCR_DYN_STR ? scr_str_retain(enc->v.str) : scr_dyn_string_coerce_js(enc);
     if (!text) return NULL;
-    if (text->len != 0) encoding = scr_crypto_encoding(text->data, text->len);
+    if (scr_str_flat_view(text)->len != 0) encoding = scr_crypto_encoding(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
     scr_str_release(text);
   }
   unsigned char stack[64];
@@ -8575,7 +8575,7 @@ ScrDyn *scr_crypto_hash_digest_dyn(ScrCryptoHash *hash, ScrDyn *enc) {
  * name it does not know. */
 ScrCryptoHash *scr_crypto_hash_update_enc(ScrCryptoHash *hash, ScrStr *data, ScrStr *enc) {
   if (!scr_crypto_hash_updatable(hash)) return NULL;
-  int encoding = scr_crypto_encoding(enc->data, enc->len);
+  int encoding = scr_crypto_encoding(scr_str_flat_view(enc)->data, scr_str_flat_view(enc)->len);
   if (encoding == SCR_CRYPTO_HEX) {
     double units = scr_str_utf16_len(data);
     if (fmod(units, 2.0) != 0) {
@@ -8666,8 +8666,8 @@ static bool scr_crypto_cshake_param(const ScrDyn *value, const char *name) {
   bool buffer;
   ScrBytes *source = NULL;
   if (value->kind == SCR_DYN_STR) {
-    bytes = (const unsigned char *)value->v.str->data;
-    len = value->v.str->len;
+    bytes = (const unsigned char *)scr_str_flat_view(value->v.str)->data;
+    len = scr_str_flat_view(value->v.str)->len;
     buffer = true;
   } else if (value->kind == SCR_DYN_BYTES) {
     bytes = value->v.bytes->data;
@@ -8705,7 +8705,7 @@ static bool scr_crypto_cshake_param(const ScrDyn *value, const char *name) {
     }
     scr_jb_puts(&b, ">");
     ScrStr *message = scr_jb_finish(&b);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, message->data, message->len, "ERR_INVALID_ARG_VALUE");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len, "ERR_INVALID_ARG_VALUE");
     scr_str_release(message);
   } else if (nul) {
     static const char message[] = "A digest option with NUL bytes in a view other than a Buffer has no native lowering";
@@ -8771,7 +8771,7 @@ ScrCryptoHash *scr_crypto_hash_new_opts(ScrStr *alg, ScrDyn *options) {
   if (!scr_crypto_output_length(options, "options.outputLength", &has_length, &length)) return NULL;
   if (!scr_crypto_cshake_options(options, &cshake)) return NULL;
   ScrDigestAlg kind;
-  if (!scr_hash_alg(alg->data, alg->len, &kind) || cshake) {
+  if (!scr_hash_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind) || cshake) {
     scr_crypto_digest_unsupported();
     return NULL;
   }
@@ -8833,7 +8833,7 @@ ScrCryptoHash *scr_crypto_hmac_new_dyn(ScrStr *alg, ScrDyn *key, ScrDyn *options
   if (!bytes) return NULL;
   ScrCryptoHash *result = NULL;
   ScrDigestAlg kind;
-  if (!scr_digest_alg(alg->data, alg->len, &kind)) scr_crypto_invalid_digest(alg);
+  if (!scr_digest_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) scr_crypto_invalid_digest(alg);
   else if (scr_crypto_hmac_digest_ok(kind))
     result = scr_crypto_hash_alloc(kind, true, bytes->data, (size_t)scr_bytes_byte_len(bytes));
   scr_bytes_release(bytes);
@@ -8867,11 +8867,11 @@ ScrCryptoHash *scr_crypto_hash_copy_opts(ScrCryptoHash *hash, ScrDyn *options) {
 static ScrStr *scr_hash_digest_raw(const ScrStr *alg, const unsigned char *data, size_t len,
                                     const ScrStr *enc) {
   ScrDigestAlg kind;
-  if (!scr_hash_alg(alg->data, alg->len, &kind)) {
+  if (!scr_hash_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) {
     scr_crypto_hash_digest_unsupported(alg);
     return NULL;
   }
-  int encoding = scr_crypto_encoding(enc->data, enc->len);
+  int encoding = scr_crypto_encoding(scr_str_flat_view(enc)->data, scr_str_flat_view(enc)->len);
   if (encoding < 0) {
     scr_crypto_encoding_unlowered();
     return NULL;
@@ -8892,7 +8892,7 @@ static ScrStr *scr_hash_digest_raw(const ScrStr *alg, const unsigned char *data,
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc) {
   char *owned;
   const char *bytes = scr_str_utf8(data, &owned);
-  ScrStr *r = scr_hash_digest_raw(alg, (const unsigned char *)bytes, data->len, enc);
+  ScrStr *r = scr_hash_digest_raw(alg, (const unsigned char *)bytes, scr_str_flat_view(data)->len, enc);
   scr_str_utf8_end(owned);
   return r;
 }
@@ -8908,7 +8908,7 @@ static ScrDyn *scr_hash_oneshot_raw(const ScrStr *alg, const unsigned char *data
                                      int encoding, bool cshake, bool has_length,
                                      double length) {
   ScrDigestAlg kind;
-  if (!scr_hash_alg(alg->data, alg->len, &kind)) {
+  if (!scr_hash_alg(scr_str_flat_view(alg)->data, scr_str_flat_view(alg)->len, &kind)) {
     scr_crypto_hash_digest_unsupported(alg);
     return NULL;
   }
@@ -8929,7 +8929,7 @@ static ScrDyn *scr_hash_oneshot_raw(const ScrStr *alg, const unsigned char *data
     scr_jb_put_str(&b, alg);
     scr_jb_puts(&b, ", which does not support XOF");
     ScrStr *message = scr_jb_finish(&b);
-    scr_throw_error_msg(SCR_ERR_ERROR, message->data, message->len);
+    scr_throw_error_msg(SCR_ERR_ERROR, scr_str_flat_view(message)->data, scr_str_flat_view(message)->len);
     scr_str_release(message);
     return NULL;
   }
@@ -8983,15 +8983,15 @@ ScrDyn *scr_crypto_hash_oneshot(ScrStr *alg, ScrDyn *input, ScrDyn *options) {
   }
   int name = SCR_CRYPTO_HEX;
   if (encoding && encoding->kind != SCR_DYN_NULL &&
-      !(encoding->kind == SCR_DYN_STR && encoding->v.str->len == 3 &&
-        memcmp(encoding->v.str->data, "hex", 3) == 0)) {
+      !(encoding->kind == SCR_DYN_STR && scr_str_flat_view(encoding->v.str)->len == 3 &&
+        memcmp(scr_str_flat_view(encoding->v.str)->data, "hex", 3) == 0)) {
     if (encoding->kind != SCR_DYN_STR) {
       scr_dyn_arg_type_fail("outputEncoding", "of type string", encoding);
       return NULL;
     }
     const ScrStr *text = encoding->v.str;
-    name = scr_crypto_encoding(text->data, text->len);
-    if (name < 0 && !scr_digest_name_is(text->data, text->len, "buffer")) {
+    name = scr_crypto_encoding(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len);
+    if (name < 0 && !scr_digest_name_is(scr_str_flat_view(text)->data, scr_str_flat_view(text)->len, "buffer")) {
       scr_dyn_arg_value_fail("outputEncoding", NULL, encoding);
       return NULL;
     }
@@ -9004,7 +9004,7 @@ ScrDyn *scr_crypto_hash_oneshot(ScrStr *alg, ScrDyn *input, ScrDyn *options) {
     ScrStr *data = input->v.str;
     char *owned;
     const char *bytes = scr_str_utf8(data, &owned);
-    ScrDyn *result = scr_hash_oneshot_raw(alg, (const unsigned char *)bytes, data->len, name,
+    ScrDyn *result = scr_hash_oneshot_raw(alg, (const unsigned char *)bytes, scr_str_flat_view(data)->len, name,
                                           cshake, has_length, length);
     scr_str_utf8_end(owned);
     return result;
@@ -9488,8 +9488,8 @@ static ScrDyn *scr_key_object_export(const ScrKeyObject *key, const ScrDyn *opti
     bool ok = !format || format->kind == SCR_DYN_UNDEF;
     if (!ok && format->kind == SCR_DYN_STR) {
       const ScrStr *text = format->v.str;
-      if (text->len == 6 && memcmp(text->data, "buffer", 6) == 0) ok = true;
-      if (text->len == 3 && memcmp(text->data, "jwk", 3) == 0) ok = jwk = true;
+      if (scr_str_flat_view(text)->len == 6 && memcmp(scr_str_flat_view(text)->data, "buffer", 6) == 0) ok = true;
+      if (scr_str_flat_view(text)->len == 3 && memcmp(scr_str_flat_view(text)->data, "jwk", 3) == 0) ok = jwk = true;
     }
     if (!ok) scr_crypto_property_one_of("options.format", "undefined, 'buffer', 'jwk'", format);
     if (format) scr_dyn_release(format);
@@ -9630,8 +9630,8 @@ ScrDyn *scr_crypto_generate_key_sync(ScrDyn *type, ScrDyn *options) {
     return NULL;
   }
   const ScrStr *name = type->v.str;
-  bool hmac = name->len == 4 && memcmp(name->data, "hmac", 4) == 0;
-  bool aes = name->len == 3 && memcmp(name->data, "aes", 3) == 0;
+  bool hmac = scr_str_flat_view(name)->len == 4 && memcmp(scr_str_flat_view(name)->data, "hmac", 4) == 0;
+  bool aes = scr_str_flat_view(name)->len == 3 && memcmp(scr_str_flat_view(name)->data, "aes", 3) == 0;
   if (!hmac && !aes) {
     char reason[] = "must be a supported key type";
     scr_dyn_arg_value_fail("type", reason, type);
@@ -9759,7 +9759,7 @@ ScrBytes *scr_crypto_pbkdf2_job(ScrBytes *password, ScrBytes *salt, double itera
     return NULL;
   }
   ScrDigestAlg alg;
-  if (!scr_digest_alg(digest->data, digest->len, &alg)) {
+  if (!scr_digest_alg(scr_str_flat_view(digest)->data, scr_str_flat_view(digest)->len, &alg)) {
     scr_crypto_invalid_digest(digest);
     return NULL;
   }
@@ -9828,7 +9828,7 @@ ScrBytes *scr_crypto_hkdf_bytes(ScrStr *digest, ScrBytes *ikm, ScrBytes *salt,
     return NULL;
   }
   ScrDigestAlg alg;
-  if (!scr_digest_alg(digest->data, digest->len, &alg)) {
+  if (!scr_digest_alg(scr_str_flat_view(digest)->data, scr_str_flat_view(digest)->len, &alg)) {
     scr_crypto_invalid_digest(digest);
     return NULL;
   }
@@ -10089,7 +10089,7 @@ ScrStr *scr_crypto_x509_fingerprint(ScrBytes *data) {
 /* The string-input form (readFileSync(path, "utf-8") — PEM text; ScrStr
  * storage IS the bytes). */
 ScrStr *scr_crypto_x509_fingerprint_str(ScrStr *pem) {
-  return scr_x509_fingerprint_raw((const uint8_t *)pem->data, pem->len);
+  return scr_x509_fingerprint_raw((const uint8_t *)scr_str_flat_view(pem)->data, scr_str_flat_view(pem)->len);
 }
 
 /* PEM armor → DER (or raw-DER passthrough), the shared front half of
@@ -10314,7 +10314,7 @@ ScrStr *scr_crypto_x509_valid_from(ScrBytes *data) {
 }
 
 ScrStr *scr_crypto_x509_valid_from_str(ScrStr *pem) {
-  return scr_x509_validity_raw((const uint8_t *)pem->data, pem->len, false);
+  return scr_x509_validity_raw((const uint8_t *)scr_str_flat_view(pem)->data, scr_str_flat_view(pem)->len, false);
 }
 
 ScrStr *scr_crypto_x509_valid_to(ScrBytes *data) {
@@ -10323,7 +10323,7 @@ ScrStr *scr_crypto_x509_valid_to(ScrBytes *data) {
 }
 
 ScrStr *scr_crypto_x509_valid_to_str(ScrStr *pem) {
-  return scr_x509_validity_raw((const uint8_t *)pem->data, pem->len, true);
+  return scr_x509_validity_raw((const uint8_t *)scr_str_flat_view(pem)->data, scr_str_flat_view(pem)->len, true);
 }
 
 /* ── String surface (fromCharCode) ────────────────────────────────────── */
@@ -10609,8 +10609,8 @@ static bool scr_date_digits(const char **p, const char *end, int n, int *out) {
 }
 
 double scr_date_parse_get_time(ScrStr *s) {
-  const char *p = s->data;
-  const char *end = s->data + s->len;
+  const char *p = scr_str_flat_view(s)->data;
+  const char *end = scr_str_flat_view(s)->data + scr_str_flat_view(s)->len;
   static const char *mon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   /* Grammar 1: "MMM [D]D HH:MM:SS YYYY GMT" (ASN1_TIME_print). */
@@ -10959,10 +10959,10 @@ ScrStr *scr_num_to_fixed0(double x) {
                                              * at/above it a - fl == 0 */
   ScrStr *digits = scr_f64_to_scrstr(n); /* n < 1e21 → never exponent form */
   if (!(x < 0)) return digits;
-  size_t len = digits->len;
+  size_t len = scr_str_flat_view(digits)->len;
   char buf[64];
   buf[0] = '-';
-  memcpy(buf + 1, digits->data, len);
+  memcpy(buf + 1, scr_str_flat_view(digits)->data, len);
   ScrStr *r = scr_str_new(buf, len + 1);
   scr_str_release(digits);
   return r;

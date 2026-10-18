@@ -186,7 +186,7 @@ static bool scr_perf_node_timing_name(const ScrStr *name) {
   static const char *const names[] = {"nodeStart", "v8Start", "environment",
                                       "loopStart", "loopExit", "bootstrapComplete"};
   for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
-    if (name->len == strlen(names[i]) && memcmp(name->data, names[i], name->len) == 0) return true;
+    if (scr_str_flat_view(name)->len == strlen(names[i]) && memcmp(scr_str_flat_view(name)->data, names[i], scr_str_flat_view(name)->len) == 0) return true;
   }
   return false;
 }
@@ -224,7 +224,7 @@ static bool scr_perf_get_mark(const ScrDyn *value, double *out) {
     char msg[160];
     int n = snprintf(msg, sizeof msg,
                      "performance.measure with the '%.*s' Node timing milestone is not supported yet",
-                     (int)name->len, name->data);
+                     (int)scr_str_flat_view(name)->len, scr_str_flat_view(name)->data);
     scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
   } else if (scr_perf_timings && scr_map_get_str_f64(scr_perf_timings, name, out)) {
     ok = true;
@@ -437,8 +437,8 @@ double scr_perf_entries(ScrDyn *args, double which) {
   scr_perf_view_len = 0;
   bool marks = true, measures = true;
   if (type) {
-    marks = type->len == 4 && memcmp(type->data, "mark", 4) == 0;
-    measures = type->len == 7 && memcmp(type->data, "measure", 7) == 0;
+    marks = scr_str_flat_view(type)->len == 4 && memcmp(scr_str_flat_view(type)->data, "mark", 4) == 0;
+    measures = scr_str_flat_view(type)->len == 7 && memcmp(scr_str_flat_view(type)->data, "measure", 7) == 0;
   }
   if (marks) scr_perf_view_add(&scr_perf_marks, name);
   if (measures) scr_perf_view_add(&scr_perf_measures, name);

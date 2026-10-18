@@ -192,7 +192,7 @@ ScrDyn *scr_worker_thread_name_current(void) {
     return name;
   }
   /* a copy: the thread record's name is freed with the record */
-  ScrStr *copy = scr_str_new(scr_worker_current->name->data, scr_worker_current->name->len);
+  ScrStr *copy = scr_str_new(scr_str_flat_view(scr_worker_current->name)->data, scr_str_flat_view(scr_worker_current->name)->len);
   ScrDyn *name = scr_dyn_new_str(copy);
   scr_str_release(copy);
   return name;
@@ -393,9 +393,9 @@ ScrWorkerThread *scr_worker_thread_start(ScrWorkerEntry entry, uint32_t root,
   worker->environment_data = environment_data;
   worker->capture = capture;
   worker->environment = scr_context_env_capture();
-  worker->name = malloc(sizeof(ScrStr) + name->len + 1);
+  worker->name = malloc(sizeof(ScrStr) + scr_str_flat_view(name)->len + 1);
   if (!worker->name) scr_trap("scriptc: out of memory\n");
-  memcpy(worker->name, name, sizeof(ScrStr) + name->len + 1);
+  memcpy(worker->name, scr_str_flat_view(name), sizeof(ScrStr) + scr_str_flat_view(name)->len + 1);
   worker->name->rc = SIZE_MAX;
   worker->parent = scr_mailbox_retain(parent);
   if (arguments) {
@@ -405,9 +405,9 @@ ScrWorkerThread *scr_worker_thread_start(ScrWorkerEntry entry, uint32_t root,
     if (!worker->argv) scr_trap("scriptc: out of memory\n");
     for (size_t i = 0; i < arguments->len; i++) {
       ScrStr *text = scr_arr_get_ref(arguments, (double)i);
-      worker->argv[i] = malloc(text->len + 1);
+      worker->argv[i] = malloc(scr_str_flat_view(text)->len + 1);
       if (!worker->argv[i]) scr_trap("scriptc: out of memory\n");
-      memcpy(worker->argv[i], text->data, text->len + 1);
+      memcpy(worker->argv[i], scr_str_flat_view(text)->data, scr_str_flat_view(text)->len + 1);
       scr_str_release(text);
     }
   }

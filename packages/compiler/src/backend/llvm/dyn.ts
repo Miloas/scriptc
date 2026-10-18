@@ -117,6 +117,7 @@ export const DYN_KIND = {
 /** What the dyn helpers need beyond the walker host: interned immortal
  * unit instances (undefined-armed dynCheck targets build them). */
 export interface DynHost extends WalkerHost {
+  flatStringIn?(B: BlockBuilder, value: string): string;
   unitInstanceRef(unionId: string, tag: number): string;
   /** See LlEmitter.retypeGuardRef. */
   retypeGuardRef(unionId: string): string;
@@ -494,6 +495,7 @@ export class LlDyn {
   /** An ScrStr's (len, data) pair — len via the %ScrStr header, data the
    * flexible tail at +24. */
   private strParts(B: BlockBuilder, s: string): { len: string; data: string } {
+    s = this.host.flatStringIn?.(B, s) ?? s;
     const lp = B.tmp();
     const len = B.tmp();
     const data = B.tmp();

@@ -176,7 +176,7 @@ static bool scr_signal_check(ScrStr *name, ScrDyn *cb) {
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "ERR_INVALID_ARG_TYPE");
     return false;
   }
-  if (name->len < 3 || memcmp(name->data, "SIG", 3) != 0) {
+  if (scr_str_flat_view(name)->len < 3 || memcmp(scr_str_flat_view(name)->data, "SIG", 3) != 0) {
     const char *msg = "scriptc: computed process event names currently support the SIG signal family";
     scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
     return false;
@@ -916,10 +916,10 @@ static ScrDyn *scr_stdio_method(ScrClosure *cb, ScrDyn *const *args, size_t argc
       scr_dyn_arg_type_fail("listener", "of type function", listener);
       goto done;
     }
-    const char *event = arg->kind == SCR_DYN_STR ? arg->v.str->data : "";
-    bool data = arg->kind == SCR_DYN_STR && arg->v.str->len == 4 && memcmp(event, "data", 4) == 0;
-    bool end = arg->kind == SCR_DYN_STR && arg->v.str->len == 3 && memcmp(event, "end", 3) == 0;
-    bool error = arg->kind == SCR_DYN_STR && arg->v.str->len == 5 && memcmp(event, "error", 5) == 0;
+    const char *event = arg->kind == SCR_DYN_STR ? scr_str_flat_view(arg->v.str)->data : "";
+    bool data = arg->kind == SCR_DYN_STR && scr_str_flat_view(arg->v.str)->len == 4 && memcmp(event, "data", 4) == 0;
+    bool end = arg->kind == SCR_DYN_STR && scr_str_flat_view(arg->v.str)->len == 3 && memcmp(event, "end", 3) == 0;
+    bool error = arg->kind == SCR_DYN_STR && scr_str_flat_view(arg->v.str)->len == 5 && memcmp(event, "error", 5) == 0;
     if ((!data && !end && !error) || (stream->fd != 0 && !error)) {
       result = scr_stdio_refusal("event");
       goto done;

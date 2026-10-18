@@ -361,8 +361,9 @@ double scr_library_u64_in(uint64_t v, const char *trap_msg) {
 
 void scr_library_str_out(ScrStr *s, const uint8_t **out, size_t *out_len) {
   scr_library_arena_keep(s, true);
-  *out = (const uint8_t *)s->data; /* NUL-terminated after len (ScrStr layout) */
-  *out_len = s->len;
+  ScrStr *flat = scr_str_flat_view(s);
+  *out = (const uint8_t *)flat->data; /* Owned by s until the arena resets. */
+  *out_len = flat->len;
 }
 
 void scr_library_bytes_out(ScrBytes *b, const uint8_t **out, size_t *out_len) {
@@ -378,7 +379,7 @@ ScrStr *scr_library_cstr_in(const char *p, const char *trap_msg) {
 
 /* A C string ends at its first NUL: text holding U+0000 cannot cross. */
 static void scr_library_cstr_check(const ScrStr *s) {
-  if (memchr(s->data, 0, s->len) != NULL) {
+  if (memchr(scr_str_flat_view(s)->data, 0, scr_str_flat_view(s)->len) != NULL) {
     scr_trap("scriptc: TypeError: a cstring value contains U+0000, which a C string cannot "
              "hold\n");
   }
@@ -387,12 +388,12 @@ static void scr_library_cstr_check(const ScrStr *s) {
 const char *scr_library_cstr_out(ScrStr *s) {
   scr_library_arena_keep(s, true);
   scr_library_cstr_check(s);
-  return s->data; /* NUL-terminated after len (ScrStr layout) */
+  return scr_str_flat_view(s)->data; /* NUL-terminated after len (ScrStr layout) */
 }
 
 const char *scr_library_cstr_arg(const ScrStr *s) {
   scr_library_cstr_check(s);
-  return s->data;
+  return scr_str_flat_view(s)->data;
 }
 
 /* ── the reset registry + session reset ─────────────────────────────────

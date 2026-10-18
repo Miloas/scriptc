@@ -61,7 +61,7 @@ static void ib_bytes(InspBuf *b, const char *s, size_t len) {
 
 static void ib_cstr(InspBuf *b, const char *s) { ib_bytes(b, s, strlen(s)); }
 static void ib_char(InspBuf *b, char c) { ib_bytes(b, &c, 1); }
-static void ib_str(InspBuf *b, const ScrStr *s) { ib_bytes(b, s->data, s->len); }
+static void ib_str(InspBuf *b, const ScrStr *s) { ib_bytes(b, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len); }
 
 static void ib_spaces(InspBuf *b, size_t n) {
   ib_grow(b, n);
@@ -366,10 +366,10 @@ ScrStr *scr_insp_ref_wrap(const void *v, ScrStr *s) {
   if (id == 0) return scr_str_retain(s);
   char buf[32];
   int n = snprintf(buf, sizeof buf, "<ref *%d> ", id);
-  ScrStr *out = scr_str_alloc_raw(s->len + (size_t)n, s->len + (size_t)n);
-  memcpy(out->data, buf, (size_t)n);
-  memcpy(out->data + n, s->data, s->len);
-  out->data[out->len] = '\0';
+  ScrStr *out = scr_str_alloc_raw(scr_str_flat_view(s)->len + (size_t)n, scr_str_flat_view(s)->len + (size_t)n);
+  memcpy(scr_str_flat_view(out)->data, buf, (size_t)n);
+  memcpy(scr_str_flat_view(out)->data + n, scr_str_flat_view(s)->data, scr_str_flat_view(s)->len);
+  scr_str_flat_view(out)->data[scr_str_flat_view(out)->len] = '\0';
   return out;
 }
 
@@ -396,7 +396,7 @@ static void insp_group(InspFrame *f, bool trailing_more) {
   size_t *data_len = malloc((output_len ? output_len : 1) * sizeof(size_t));
   if (!data_len) insp_oom();
   for (size_t i = 0; i < output_len; i++) {
-    size_t w = insp_width(f->items[i]->data, f->items[i]->len);
+    size_t w = insp_width(scr_str_flat_view(f->items[i])->data, scr_str_flat_view(f->items[i])->len);
     data_len[i] = w;
     total_length += (double)w + 2;
     if ((double)w > max_length) max_length = (double)w;
@@ -487,10 +487,10 @@ static bool insp_below_break_length(InspFrame *f, size_t start, const ScrStr *ba
   size_t total = f->len + start;
   if ((double)(total + f->len) > g_break_length) return false;
   for (size_t i = 0; i < f->len; i++) {
-    total += insp_utf16_len(f->items[i]->data, f->items[i]->len);
+    total += insp_utf16_len(scr_str_flat_view(f->items[i])->data, scr_str_flat_view(f->items[i])->len);
     if ((double)total > g_break_length) return false;
   }
-  return base->len == 0 || !insp_contains_byte(base->data, base->len, '\n');
+  return scr_str_flat_view(base)->len == 0 || !insp_contains_byte(scr_str_flat_view(base)->data, scr_str_flat_view(base)->len, '\n');
 }
 
 /* reduceToSingleString for a numeric or false compact (only a compact of
@@ -512,15 +512,15 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
   if (compact && array_extras && entries > 6) insp_group(f, trailing_more);
   InspBuf out = {0};
   if (compact && g_cur_depth - recurse < g_compact && entries == f->len) {
-    size_t start = f->len + g_indent + insp_utf16_len(b0->data, b0->len) +
-                   insp_utf16_len(base->data, base->len) + 10;
+    size_t start = f->len + g_indent + insp_utf16_len(scr_str_flat_view(b0)->data, scr_str_flat_view(b0)->len) +
+                   insp_utf16_len(scr_str_flat_view(base)->data, scr_str_flat_view(base)->len) + 10;
     if (insp_below_break_length(f, start, base)) {
       bool multiline = false;
       for (size_t i = 0; i < f->len && !multiline; i++) {
-        multiline = insp_contains_byte(f->items[i]->data, f->items[i]->len, '\n');
+        multiline = insp_contains_byte(scr_str_flat_view(f->items[i])->data, scr_str_flat_view(f->items[i])->len, '\n');
       }
       if (!multiline) {
-        if (base->len) {
+        if (scr_str_flat_view(base)->len) {
           ib_str(&out, base);
           ib_char(&out, ' ');
         }
@@ -536,7 +536,7 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
       }
     }
   }
-  if (base->len) {
+  if (scr_str_flat_view(base)->len) {
     ib_str(&out, base);
     ib_char(&out, ' ');
   }
@@ -613,8 +613,8 @@ ScrStr *scr_insp_nested_end(ScrStr *prefix, ScrStr *inner) {
   InspBuf out = {0};
   ib_str(&out, prefix);
   ib_char(&out, ' ');
-  for (size_t i = 0; i < inner->len; i++) {
-    char c = inner->data[i];
+  for (size_t i = 0; i < scr_str_flat_view(inner)->len; i++) {
+    char c = scr_str_flat_view(inner)->data[i];
     ib_char(&out, c);
     if (c == '\n') ib_spaces(&out, g_indent);
   }
@@ -654,8 +654,8 @@ static size_t insp_utf16_offset(const char *data, size_t len, size_t units, bool
  * cut characters. Uses the CURRENT indentation. */
 ScrStr *scr_insp_str(ScrStr *s) {
   InspBuf out = {0};
-  const char *data = s->data;
-  size_t byte_len = s->len;
+  const char *data = scr_str_flat_view(s)->data;
+  size_t byte_len = scr_str_flat_view(s)->len;
   size_t units = insp_utf16_len(data, byte_len);
   char trailer[64] = "";
   char surrogate_tail[4];
@@ -715,9 +715,9 @@ ScrStr *scr_insp_str(ScrStr *s) {
 ScrStr *scr_insp_regex(ScrRegex *re) {
   InspBuf out = {0};
   ib_char(&out, '/');
-  ib_bytes(&out, re->source->data, re->source->len);
+  ib_bytes(&out, scr_str_flat_view(re->source)->data, scr_str_flat_view(re->source)->len);
   ib_char(&out, '/');
-  ib_bytes(&out, re->flags->data, re->flags->len);
+  ib_bytes(&out, scr_str_flat_view(re->flags)->data, scr_str_flat_view(re->flags)->len);
   return ib_take(&out);
 }
 
@@ -839,12 +839,12 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   InspBuf base = {0};
   ib_char(&base, '[');
   ib_str(&base, e->name);
-  if (e->message->len) {
+  if (scr_str_flat_view(e->message)->len) {
     ib_cstr(&base, ": ");
     /* indent embedded newlines by the CURRENT level (formatError's
      * final replaceAll — g_indent is the property's own level here). */
-    for (size_t i = 0; i < e->message->len; i++) {
-      char c = e->message->data[i];
+    for (size_t i = 0; i < scr_str_flat_view(e->message)->len; i++) {
+      char c = scr_str_flat_view(e->message)->data[i];
       ib_char(&base, c);
       if (c == '\n') ib_spaces(&base, g_indent);
     }
@@ -856,7 +856,7 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   {
     InspBuf entry = {0};
     ib_cstr(&entry, "code: ");
-    insp_quote_into(&entry, e->code->data, e->code->len);
+    insp_quote_into(&entry, scr_str_flat_view(e->code)->data, scr_str_flat_view(e->code)->len);
     ScrStr *entry_str = ib_take(&entry);
     scr_insp_entry(entry_str, false);
     scr_str_release(entry_str);
@@ -898,7 +898,7 @@ static void insp_key_into(InspBuf *b, const char *key, size_t len) {
  * must run here): insp_key_into over a ScrStr. Borrows; result +1. */
 ScrStr *scr_insp_key(ScrStr *k) {
   InspBuf b = {0};
-  insp_key_into(&b, k->data, k->len);
+  insp_key_into(&b, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
   return ib_take(&b);
 }
 
@@ -923,8 +923,8 @@ static ScrDyn *insp_assertion_ellipsis(ScrDyn *value) {
   if (value->kind != SCR_DYN_STR) return scr_dyn_retain(value);
   ScrStr *text = value->v.str;
   size_t lines = 1, cut = 0;
-  for (size_t i = 0; i < text->len; i++) {
-    if (text->data[i] != '\n') continue;
+  for (size_t i = 0; i < scr_str_flat_view(text)->len; i++) {
+    if (scr_str_flat_view(text)->data[i] != '\n') continue;
     if (++lines == 11) {
       cut = i;
       break;
@@ -932,7 +932,7 @@ static ScrDyn *insp_assertion_ellipsis(ScrDyn *value) {
   }
   InspBuf b = {0};
   if (lines > 10) {
-    ib_bytes(&b, text->data, cut);
+    ib_bytes(&b, scr_str_flat_view(text)->data, cut);
     ib_cstr(&b, "\n...");
   } else if (scr_str_utf16_len(text) > 512) {
     ScrStr *tail = scr_str_slice(text, 512, scr_str_utf16_len(text));
@@ -959,8 +959,8 @@ static ScrStr *scr_insp_dyn_error(ScrDyn *d, double recurse, double depth) {
   if (circular != 0) return scr_insp_circular(circular);
   const ScrDyn *name = insp_error_slot(d, "name", 4);
   const ScrDyn *message = insp_error_slot(d, "message", 7);
-  bool assertion = name != NULL && name->v.str->len == 14 &&
-                   memcmp(name->v.str->data, "AssertionError", 14) == 0;
+  bool assertion = name != NULL && scr_str_flat_view(name->v.str)->len == 14 &&
+                   memcmp(scr_str_flat_view(name->v.str)->data, "AssertionError", 14) == 0;
   double value_depth = assertion ? recurse : depth;
   size_t extra = 0;
   for (size_t i = 0; i < d->v.obj.len; i++) {
@@ -980,10 +980,10 @@ static ScrStr *scr_insp_dyn_error(ScrDyn *d, double recurse, double depth) {
     ib_char(&base, ']');
     return ib_take(&base);
   }
-  if (message != NULL && message->v.str->len) {
+  if (message != NULL && scr_str_flat_view(message->v.str)->len) {
     ib_cstr(&base, ": ");
-    for (size_t i = 0; i < message->v.str->len; i++) {
-      char c = message->v.str->data[i];
+    for (size_t i = 0; i < scr_str_flat_view(message->v.str)->len; i++) {
+      char c = scr_str_flat_view(message->v.str)->data[i];
       ib_char(&base, c);
       if (c == '\n') ib_spaces(&base, g_indent);
     }
@@ -1008,7 +1008,7 @@ static ScrStr *scr_insp_dyn_error(ScrDyn *d, double recurse, double depth) {
     InspBuf eb = {0};
     insp_key_into(&eb, ent->key, ent->key_len);
     ib_cstr(&eb, ": ");
-    ib_bytes(&eb, val->data, val->len);
+    ib_bytes(&eb, scr_str_flat_view(val)->data, scr_str_flat_view(val)->len);
     scr_str_release(val);
     ScrStr *entry = ib_take(&eb);
     scr_insp_entry(entry, false);
@@ -1100,9 +1100,9 @@ static ScrStr *scr_insp_dyn_collection(ScrDyn *d, double recurse, double depth, 
     ScrStr *v = scr_insp_dyn(value, recurse + 1, depth);
     scr_dyn_release(value);
     InspBuf eb = {0};
-    ib_bytes(&eb, k->data, k->len);
+    ib_bytes(&eb, scr_str_flat_view(k)->data, scr_str_flat_view(k)->len);
     ib_cstr(&eb, " => ");
-    ib_bytes(&eb, v->data, v->len);
+    ib_bytes(&eb, scr_str_flat_view(v)->data, scr_str_flat_view(v)->len);
     scr_str_release(k);
     scr_str_release(v);
     ScrStr *entry = ib_take(&eb);
@@ -1156,7 +1156,7 @@ static ScrStr *scr_insp_obj(ScrDyn *d, double recurse, double depth, const char 
     InspBuf eb = {0};
     insp_key_into(&eb, ent->key, ent->key_len);
     ib_cstr(&eb, ": ");
-    ib_bytes(&eb, val->data, val->len);
+    ib_bytes(&eb, scr_str_flat_view(val)->data, scr_str_flat_view(val)->len);
     scr_str_release(val);
     ScrStr *entry = ib_take(&eb);
     scr_insp_entry(entry, false);
@@ -1168,9 +1168,9 @@ static ScrStr *scr_insp_obj(ScrDyn *d, double recurse, double depth, const char 
     ScrStr *key = scr_insp_dyn(d->symbol_keys->v.arr.items[i], recurse + 1, depth);
     ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
     InspBuf eb = {0};
-    ib_bytes(&eb, key->data, key->len);
+    ib_bytes(&eb, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len);
     ib_cstr(&eb, ": ");
-    ib_bytes(&eb, val->data, val->len);
+    ib_bytes(&eb, scr_str_flat_view(val)->data, scr_str_flat_view(val)->len);
     scr_str_release(key);
     scr_str_release(val);
     ScrStr *entry = ib_take(&eb);
@@ -1333,7 +1333,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_char(&out, ']');
         }
         ib_char(&out, ' ');
-        ib_bytes(&out, body->data, body->len);
+        ib_bytes(&out, scr_str_flat_view(body)->data, scr_str_flat_view(body)->len);
         scr_str_release(body);
         return ib_take(&out);
       }
@@ -1362,7 +1362,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         InspBuf out = {0};
         ib_cstr(&out, cls);
         ib_char(&out, ' ');
-        ib_bytes(&out, body->data, body->len);
+        ib_bytes(&out, scr_str_flat_view(body)->data, scr_str_flat_view(body)->len);
         scr_str_release(body);
         return ib_take(&out);
       }
@@ -1373,10 +1373,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       ScrStr *out;
       if (name && materialized->kind == SCR_DYN_OBJ &&
           scr_dyn_obj_get(materialized, "%error", 6) == NULL) {
-        char *cls = malloc(name->len + 1);
+        char *cls = malloc(scr_str_flat_view(name)->len + 1);
         if (!cls) scr_trap("scriptc: out of memory\n");
-        memcpy(cls, name->data, name->len);
-        cls[name->len] = '\0';
+        memcpy(cls, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+        cls[scr_str_flat_view(name)->len] = '\0';
         out = scr_insp_obj(materialized, recurse, depth, cls);
         free(cls);
       } else {

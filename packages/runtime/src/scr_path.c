@@ -195,7 +195,7 @@ static void scr_path_normalize_raw(const char *path, size_t len, PathBuf *out) {
 ScrStr *scr_path_normalize(ScrStr *path) {
   PathBuf out;
   pb_init(&out);
-  scr_path_normalize_raw(path->data, path->len, &out);
+  scr_path_normalize_raw(scr_str_flat_view(path)->data, scr_str_flat_view(path)->len, &out);
   return pb_take(&out);
 }
 
@@ -206,9 +206,9 @@ ScrStr *scr_path_join(ScrArr *parts) {
   bool any = false;
   for (size_t i = 0; i < n; i++) {
     ScrStr *arg = scr_arr_get_ref(parts, (double)i); /* +1 */
-    if (arg->len > 0) {
+    if (scr_str_flat_view(arg)->len > 0) {
       if (any) pb_push(&joined, '/');
-      pb_append(&joined, arg->data, arg->len);
+      pb_append(&joined, scr_str_flat_view(arg)->data, scr_str_flat_view(arg)->len);
       any = true;
     }
     scr_str_release(arg);
@@ -261,7 +261,7 @@ ScrStr *scr_path_resolve(ScrArr *parts) {
     pb_init(&seg);
     if (i >= 0) {
       ScrStr *arg = scr_arr_get_ref(parts, (double)i); /* +1 */
-      pb_append(&seg, arg->data, arg->len);
+      pb_append(&seg, scr_str_flat_view(arg)->data, scr_str_flat_view(arg)->len);
       scr_str_release(arg);
     } else {
       scr_path_posix_cwd(&seg);
@@ -295,11 +295,11 @@ ScrStr *scr_path_resolve(ScrArr *parts) {
   return pb_take(&out);
 }
 
-bool scr_path_is_absolute(ScrStr *path) { return path->len > 0 && path->data[0] == '/'; }
+bool scr_path_is_absolute(ScrStr *path) { return scr_str_flat_view(path)->len > 0 && scr_str_flat_view(path)->data[0] == '/'; }
 
 ScrStr *scr_path_dirname(ScrStr *path) {
-  size_t len = path->len;
-  const char *p = path->data;
+  size_t len = scr_str_flat_view(path)->len;
+  const char *p = scr_str_flat_view(path)->data;
   if (len == 0) return scr_str_new(".", 1);
   bool has_root = p[0] == '/';
   long end = -1;
@@ -320,16 +320,16 @@ ScrStr *scr_path_dirname(ScrStr *path) {
 }
 
 ScrStr *scr_path_basename(ScrStr *path, ScrStr *suffix) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long start = 0;
   long end = -1;
   bool matched_slash = true;
-  if (suffix->len > 0 && suffix->len <= path->len) {
-    if (suffix->len == path->len && memcmp(suffix->data, p, path->len) == 0) {
+  if (scr_str_flat_view(suffix)->len > 0 && scr_str_flat_view(suffix)->len <= scr_str_flat_view(path)->len) {
+    if (scr_str_flat_view(suffix)->len == scr_str_flat_view(path)->len && memcmp(scr_str_flat_view(suffix)->data, p, scr_str_flat_view(path)->len) == 0) {
       return scr_str_new("", 0);
     }
-    long ext_idx = (long)suffix->len - 1;
+    long ext_idx = (long)scr_str_flat_view(suffix)->len - 1;
     long first_non_slash_end = -1;
     for (long i = len - 1; i >= 0; --i) {
       char code = p[i];
@@ -344,7 +344,7 @@ ScrStr *scr_path_basename(ScrStr *path, ScrStr *suffix) {
           first_non_slash_end = i + 1;
         }
         if (ext_idx >= 0) {
-          if (code == suffix->data[ext_idx]) {
+          if (code == scr_str_flat_view(suffix)->data[ext_idx]) {
             if (--ext_idx == -1) end = i;
           } else {
             ext_idx = -1;
@@ -373,8 +373,8 @@ ScrStr *scr_path_basename(ScrStr *path, ScrStr *suffix) {
 }
 
 ScrStr *scr_path_extname(ScrStr *path) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long start_dot = -1;
   long start_part = 0;
   long end = -1;
@@ -409,7 +409,7 @@ ScrStr *scr_path_extname(ScrStr *path) {
 }
 
 ScrStr *scr_path_relative(ScrStr *from, ScrStr *to) {
-  if (from->len == to->len && memcmp(from->data, to->data, from->len) == 0) {
+  if (scr_str_flat_view(from)->len == scr_str_flat_view(to)->len && memcmp(scr_str_flat_view(from)->data, scr_str_flat_view(to)->data, scr_str_flat_view(from)->len) == 0) {
     return scr_str_new("", 0);
   }
   /* from = resolve(from), to = resolve(to) — via one-element packs. */
@@ -422,42 +422,42 @@ ScrStr *scr_path_relative(ScrStr *from, ScrStr *to) {
   ScrStr *rto = scr_path_resolve(pack);
   scr_arr_release(pack);
 
-  if (rfrom->len == rto->len && memcmp(rfrom->data, rto->data, rfrom->len) == 0) {
+  if (scr_str_flat_view(rfrom)->len == scr_str_flat_view(rto)->len && memcmp(scr_str_flat_view(rfrom)->data, scr_str_flat_view(rto)->data, scr_str_flat_view(rfrom)->len) == 0) {
     scr_str_release(rfrom);
     scr_str_release(rto);
     return scr_str_new("", 0);
   }
 
   const long from_start = 1;
-  const long from_end = (long)rfrom->len;
+  const long from_end = (long)scr_str_flat_view(rfrom)->len;
   const long from_len = from_end - from_start;
   const long to_start = 1;
-  const long to_len = (long)rto->len - to_start;
+  const long to_len = (long)scr_str_flat_view(rto)->len - to_start;
 
   const long length = from_len < to_len ? from_len : to_len;
   long last_common_sep = -1;
   long i = 0;
   for (; i < length; i++) {
-    char from_code = rfrom->data[from_start + i];
-    if (from_code != rto->data[to_start + i]) break;
+    char from_code = scr_str_flat_view(rfrom)->data[from_start + i];
+    if (from_code != scr_str_flat_view(rto)->data[to_start + i]) break;
     if (from_code == '/') last_common_sep = i;
   }
   if (i == length) {
     if (to_len > length) {
-      if (rto->data[to_start + i] == '/') {
-        ScrStr *r = scr_str_new(rto->data + to_start + i + 1, (size_t)(to_len - i - 1));
+      if (scr_str_flat_view(rto)->data[to_start + i] == '/') {
+        ScrStr *r = scr_str_new(scr_str_flat_view(rto)->data + to_start + i + 1, (size_t)(to_len - i - 1));
         scr_str_release(rfrom);
         scr_str_release(rto);
         return r;
       }
       if (i == 0) {
-        ScrStr *r = scr_str_new(rto->data + to_start, (size_t)to_len);
+        ScrStr *r = scr_str_new(scr_str_flat_view(rto)->data + to_start, (size_t)to_len);
         scr_str_release(rfrom);
         scr_str_release(rto);
         return r;
       }
     } else if (from_len > length) {
-      if (rfrom->data[from_start + i] == '/') last_common_sep = i;
+      if (scr_str_flat_view(rfrom)->data[from_start + i] == '/') last_common_sep = i;
       else if (i == 0) last_common_sep = 0;
     }
   }
@@ -465,13 +465,13 @@ ScrStr *scr_path_relative(ScrStr *from, ScrStr *to) {
   PathBuf out;
   pb_init(&out);
   for (long j = from_start + last_common_sep + 1; j <= from_end; ++j) {
-    if (j == from_end || rfrom->data[j] == '/') {
+    if (j == from_end || scr_str_flat_view(rfrom)->data[j] == '/') {
       if (out.len == 0) pb_append(&out, "..", 2);
       else pb_append(&out, "/..", 3);
     }
   }
-  pb_append(&out, rto->data + to_start + last_common_sep,
-            (size_t)((long)rto->len - (to_start + last_common_sep)));
+  pb_append(&out, scr_str_flat_view(rto)->data + to_start + last_common_sep,
+            (size_t)((long)scr_str_flat_view(rto)->len - (to_start + last_common_sep)));
   scr_str_release(rfrom);
   scr_str_release(rto);
   return pb_take(&out);
@@ -714,7 +714,7 @@ static void scr_path_w32_normalize_raw(const char *path, size_t len, PathBuf *ou
 ScrStr *scr_path_win32_normalize(ScrStr *path) {
   PathBuf out;
   pb_init(&out);
-  scr_path_w32_normalize_raw(path->data, path->len, &out);
+  scr_path_w32_normalize_raw(scr_str_flat_view(path)->data, scr_str_flat_view(path)->len, &out);
   return pb_take(&out);
 }
 
@@ -726,10 +726,10 @@ ScrStr *scr_path_win32_join(ScrArr *parts) {
   size_t first_len = 0; /* the first NON-EMPTY argument's length */
   for (size_t i = 0; i < n; i++) {
     ScrStr *arg = scr_arr_get_ref(parts, (double)i); /* +1 */
-    if (arg->len > 0) {
+    if (scr_str_flat_view(arg)->len > 0) {
       if (any) pb_push(&joined, '\\');
-      else first_len = arg->len;
-      pb_append(&joined, arg->data, arg->len);
+      else first_len = scr_str_flat_view(arg)->len;
+      pb_append(&joined, scr_str_flat_view(arg)->data, scr_str_flat_view(arg)->len);
       any = true;
     }
     scr_str_release(arg);
@@ -807,12 +807,12 @@ ScrStr *scr_path_win32_resolve(ScrArr *parts) {
     pb_init(&pathb);
     if (i >= 0) {
       ScrStr *arg = scr_arr_get_ref(parts, (double)i); /* +1 */
-      if (arg->len == 0) {
+      if (scr_str_flat_view(arg)->len == 0) {
         scr_str_release(arg);
         free(pathb.data);
         continue;
       }
-      pb_append(&pathb, arg->data, arg->len);
+      pb_append(&pathb, scr_str_flat_view(arg)->data, scr_str_flat_view(arg)->len);
       scr_str_release(arg);
     } else if (dev.len == 0) {
       scr_path_cwd(&pathb);
@@ -823,7 +823,7 @@ ScrStr *scr_path_win32_resolve(ScrArr *parts) {
       bool fast = n == 0;
       if (!fast && n == 1) {
         ScrStr *a0 = scr_arr_get_ref(parts, 0); /* +1 */
-        bool empty_or_dot = a0->len == 0 || (a0->len == 1 && a0->data[0] == '.');
+        bool empty_or_dot = scr_str_flat_view(a0)->len == 0 || (scr_str_flat_view(a0)->len == 1 && scr_str_flat_view(a0)->data[0] == '.');
         scr_str_release(a0);
         fast = empty_or_dot && pathb.len > 0 && scr_path_w32_is_sep(pathb.data[0]);
       }
@@ -967,16 +967,16 @@ ScrStr *scr_path_win32_resolve(ScrArr *parts) {
 }
 
 bool scr_path_win32_is_absolute(ScrStr *path) {
-  size_t len = path->len;
+  size_t len = scr_str_flat_view(path)->len;
   if (len == 0) return false;
-  const char *p = path->data;
+  const char *p = scr_str_flat_view(path)->data;
   return scr_path_w32_is_sep(p[0]) ||
          (len > 2 && scr_path_w32_is_device_root(p[0]) && p[1] == ':' &&
           scr_path_w32_is_sep(p[2]));
 }
 
 ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
-  if (from->len == to->len && memcmp(from->data, to->data, from->len) == 0) {
+  if (scr_str_flat_view(from)->len == scr_str_flat_view(to)->len && memcmp(scr_str_flat_view(from)->data, scr_str_flat_view(to)->data, scr_str_flat_view(from)->len) == 0) {
     return scr_str_new("", 0);
   }
   /* fromOrig = win32.resolve(from), toOrig = win32.resolve(to). */
@@ -989,7 +989,7 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
   ScrStr *rto = scr_path_win32_resolve(pack);
   scr_arr_release(pack);
 
-  if (rfrom->len == rto->len && memcmp(rfrom->data, rto->data, rfrom->len) == 0) {
+  if (scr_str_flat_view(rfrom)->len == scr_str_flat_view(rto)->len && memcmp(scr_str_flat_view(rfrom)->data, scr_str_flat_view(rto)->data, scr_str_flat_view(rfrom)->len) == 0) {
     scr_str_release(rfrom);
     scr_str_release(rto);
     return scr_str_new("", 0);
@@ -997,14 +997,14 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
   /* Node lowercases both sides (case-insensitive comparison, ASCII fold
    * here — see the header comment). Byte-lowercasing never changes
    * lengths, so Node's changed-length Unicode branch cannot trigger. */
-  char *flow = malloc(rfrom->len ? rfrom->len : 1);
-  char *tlow = malloc(rto->len ? rto->len : 1);
+  char *flow = malloc(scr_str_flat_view(rfrom)->len ? scr_str_flat_view(rfrom)->len : 1);
+  char *tlow = malloc(scr_str_flat_view(rto)->len ? scr_str_flat_view(rto)->len : 1);
   if (!flow || !tlow) {
     scr_trap("scriptc: out of memory\n");
   }
-  for (size_t k = 0; k < rfrom->len; k++) flow[k] = scr_path_w32_lower(rfrom->data[k]);
-  for (size_t k = 0; k < rto->len; k++) tlow[k] = scr_path_w32_lower(rto->data[k]);
-  if (rfrom->len == rto->len && memcmp(flow, tlow, rfrom->len) == 0) {
+  for (size_t k = 0; k < scr_str_flat_view(rfrom)->len; k++) flow[k] = scr_path_w32_lower(scr_str_flat_view(rfrom)->data[k]);
+  for (size_t k = 0; k < scr_str_flat_view(rto)->len; k++) tlow[k] = scr_path_w32_lower(scr_str_flat_view(rto)->data[k]);
+  if (scr_str_flat_view(rfrom)->len == scr_str_flat_view(rto)->len && memcmp(flow, tlow, scr_str_flat_view(rfrom)->len) == 0) {
     free(flow);
     free(tlow);
     scr_str_release(rfrom);
@@ -1014,14 +1014,14 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
 
   /* Trim leading backslashes, and trailing ones (UNC paths only). */
   long from_start = 0;
-  while (from_start < (long)rfrom->len && flow[from_start] == '\\') from_start++;
-  long from_end = (long)rfrom->len;
+  while (from_start < (long)scr_str_flat_view(rfrom)->len && flow[from_start] == '\\') from_start++;
+  long from_end = (long)scr_str_flat_view(rfrom)->len;
   while (from_end - 1 > from_start && flow[from_end - 1] == '\\') from_end--;
   const long from_len = from_end - from_start;
 
   long to_start = 0;
-  while (to_start < (long)rto->len && tlow[to_start] == '\\') to_start++;
-  long to_end = (long)rto->len;
+  while (to_start < (long)scr_str_flat_view(rto)->len && tlow[to_start] == '\\') to_start++;
+  long to_end = (long)scr_str_flat_view(rto)->len;
   while (to_end - 1 > to_start && tlow[to_end - 1] == '\\') to_end--;
   const long to_len = to_end - to_start;
 
@@ -1036,15 +1036,15 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
   ScrStr *result = NULL;
   if (i != length) {
     /* Mismatch before any common separator: return toOrig. */
-    if (last_common_sep == -1) result = scr_str_new(rto->data, rto->len);
+    if (last_common_sep == -1) result = scr_str_new(scr_str_flat_view(rto)->data, scr_str_flat_view(rto)->len);
   } else {
     if (to_len > length) {
       if (tlow[to_start + i] == '\\') {
         /* `from` is the exact base path of `to`. */
-        result = scr_str_new(rto->data + to_start + i + 1, (size_t)(to_end - (to_start + i + 1)));
+        result = scr_str_new(scr_str_flat_view(rto)->data + to_start + i + 1, (size_t)(to_end - (to_start + i + 1)));
       } else if (i == 2) {
         /* `from` is the device root. */
-        result = scr_str_new(rto->data + to_start + i, (size_t)(to_end - (to_start + i)));
+        result = scr_str_new(scr_str_flat_view(rto)->data + to_start + i, (size_t)(to_end - (to_start + i)));
       }
     }
     if (result == NULL && from_len > length) {
@@ -1072,10 +1072,10 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
   to_start += last_common_sep;
   if (out.len == 0) {
     /* Node reads toOrig.charCodeAt(toStart) — NaN out of range. */
-    if (to_start < (long)rto->len && rto->data[to_start] == '\\') ++to_start;
+    if (to_start < (long)scr_str_flat_view(rto)->len && scr_str_flat_view(rto)->data[to_start] == '\\') ++to_start;
   }
   /* toOrig.slice(toStart, toEnd) — "" when the range is empty/inverted. */
-  if (to_end > to_start) pb_append(&out, rto->data + to_start, (size_t)(to_end - to_start));
+  if (to_end > to_start) pb_append(&out, scr_str_flat_view(rto)->data + to_start, (size_t)(to_end - to_start));
   free(flow);
   free(tlow);
   scr_str_release(rfrom);
@@ -1084,7 +1084,7 @@ ScrStr *scr_path_win32_relative(ScrStr *from, ScrStr *to) {
 }
 
 ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path) {
-  if (path->len == 0) return scr_str_retain(path);
+  if (scr_str_flat_view(path)->len == 0) return scr_str_retain(path);
   ScrArr *pack = scr_arr_new(SCR_ELEM_STR, 1);
   scr_arr_push_ref(pack, scr_str_retain(path));
   ScrStr *resolved = scr_path_win32_resolve(pack);
@@ -1094,7 +1094,7 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path) {
     scr_str_release(resolved);
     return scr_str_retain(path);
   }
-  const char *r = resolved->data;
+  const char *r = scr_str_flat_view(resolved)->data;
   if (r[0] == '\\') {
     /* Possible UNC root. */
     if (r[1] == '\\') {
@@ -1104,7 +1104,7 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path) {
         PathBuf out;
         pb_init(&out);
         pb_append(&out, "\\\\?\\UNC\\", 8);
-        pb_append(&out, r + 2, resolved->len - 2);
+        pb_append(&out, r + 2, scr_str_flat_view(resolved)->len - 2);
         scr_str_release(resolved);
         return pb_take(&out);
       }
@@ -1114,7 +1114,7 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path) {
     PathBuf out;
     pb_init(&out);
     pb_append(&out, "\\\\?\\", 4);
-    pb_append(&out, r, resolved->len);
+    pb_append(&out, r, scr_str_flat_view(resolved)->len);
     scr_str_release(resolved);
     return pb_take(&out);
   }
@@ -1125,8 +1125,8 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path) {
 ScrStr *scr_path_to_namespaced_path(ScrStr *path) { return scr_str_retain(path); }
 
 ScrStr *scr_path_win32_dirname(ScrStr *path) {
-  size_t len = path->len;
-  const char *p = path->data;
+  size_t len = scr_str_flat_view(path)->len;
+  const char *p = scr_str_flat_view(path)->data;
   if (len == 0) return scr_str_new(".", 1);
   long root_end = -1;
   size_t offset = 0;
@@ -1185,18 +1185,18 @@ ScrStr *scr_path_win32_dirname(ScrStr *path) {
 }
 
 ScrStr *scr_path_win32_basename(ScrStr *path, ScrStr *suffix) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long start = 0;
   long end = -1;
   bool matched_slash = true;
   /* A drive-letter prefix's separator is not a trailing separator. */
   if (len >= 2 && scr_path_w32_is_device_root(p[0]) && p[1] == ':') start = 2;
-  if (suffix->len > 0 && suffix->len <= path->len) {
-    if (suffix->len == path->len && memcmp(suffix->data, p, path->len) == 0) {
+  if (scr_str_flat_view(suffix)->len > 0 && scr_str_flat_view(suffix)->len <= scr_str_flat_view(path)->len) {
+    if (scr_str_flat_view(suffix)->len == scr_str_flat_view(path)->len && memcmp(scr_str_flat_view(suffix)->data, p, scr_str_flat_view(path)->len) == 0) {
       return scr_str_new("", 0);
     }
-    long ext_idx = (long)suffix->len - 1;
+    long ext_idx = (long)scr_str_flat_view(suffix)->len - 1;
     long first_non_slash_end = -1;
     for (long i = len - 1; i >= start; --i) {
       char code = p[i];
@@ -1211,7 +1211,7 @@ ScrStr *scr_path_win32_basename(ScrStr *path, ScrStr *suffix) {
           first_non_slash_end = i + 1;
         }
         if (ext_idx >= 0) {
-          if (code == suffix->data[ext_idx]) {
+          if (code == scr_str_flat_view(suffix)->data[ext_idx]) {
             if (--ext_idx == -1) end = i;
           } else {
             ext_idx = -1;
@@ -1240,8 +1240,8 @@ ScrStr *scr_path_win32_basename(ScrStr *path, ScrStr *suffix) {
 }
 
 ScrStr *scr_path_win32_extname(ScrStr *path) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long start = 0;
   long start_dot = -1;
   long start_part = 0;
@@ -1295,8 +1295,8 @@ static ScrArr *scr_path_parts(const char *p, long root[2], long dir[2], long bas
 }
 
 ScrArr *scr_path_parse(ScrStr *path) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long root[2] = { 0, 0 }, dir[2] = { 0, 0 }, base[2] = { 0, 0 }, ext[2] = { 0, 0 },
        name[2] = { 0, 0 };
   if (len == 0) return scr_path_parts(p, root, dir, base, ext, name);
@@ -1353,8 +1353,8 @@ ScrArr *scr_path_parse(ScrStr *path) {
 }
 
 ScrArr *scr_path_win32_parse(ScrStr *path) {
-  const char *p = path->data;
-  long len = (long)path->len;
+  const char *p = scr_str_flat_view(path)->data;
+  long len = (long)scr_str_flat_view(path)->len;
   long root[2] = { 0, 0 }, dir[2] = { 0, 0 }, base[2] = { 0, 0 }, ext[2] = { 0, 0 },
        name[2] = { 0, 0 };
   if (len == 0) return scr_path_parts(p, root, dir, base, ext, name);
@@ -1453,22 +1453,22 @@ static ScrStr *scr_path_format_with(char sep, ScrStr *root, ScrStr *dir, ScrStr 
                                     ScrStr *ext) {
   /* dir = pathObject.dir || pathObject.root; base = pathObject.base ||
    * `${name || ''}${formatExt(ext)}`. */
-  ScrStr *d = dir->len > 0 ? dir : root;
+  ScrStr *d = scr_str_flat_view(dir)->len > 0 ? dir : root;
   PathBuf b;
   pb_init(&b);
-  if (d->len > 0) {
-    pb_append(&b, d->data, d->len);
+  if (scr_str_flat_view(d)->len > 0) {
+    pb_append(&b, scr_str_flat_view(d)->data, scr_str_flat_view(d)->len);
     /* `${dir}${sep}${base}` unless dir is the root itself. */
-    bool is_root = d->len == root->len && memcmp(d->data, root->data, d->len) == 0;
+    bool is_root = scr_str_flat_view(d)->len == scr_str_flat_view(root)->len && memcmp(scr_str_flat_view(d)->data, scr_str_flat_view(root)->data, scr_str_flat_view(d)->len) == 0;
     if (!is_root) pb_push(&b, sep);
   }
-  if (base->len > 0) {
-    pb_append(&b, base->data, base->len);
+  if (scr_str_flat_view(base)->len > 0) {
+    pb_append(&b, scr_str_flat_view(base)->data, scr_str_flat_view(base)->len);
   } else {
-    pb_append(&b, name->data, name->len);
-    if (ext->len > 0) {
-      if (ext->data[0] != '.') pb_push(&b, '.');
-      pb_append(&b, ext->data, ext->len);
+    pb_append(&b, scr_str_flat_view(name)->data, scr_str_flat_view(name)->len);
+    if (scr_str_flat_view(ext)->len > 0) {
+      if (scr_str_flat_view(ext)->data[0] != '.') pb_push(&b, '.');
+      pb_append(&b, scr_str_flat_view(ext)->data, scr_str_flat_view(ext)->len);
     }
   }
   return pb_take(&b);

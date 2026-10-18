@@ -203,9 +203,9 @@ static bool is_js_space(uint16_t c) {
 static S s_from_str(Arena *a, const ScrStr *str) {
   B b;
   b_init(&b, a);
-  b_reserve(&b, str->len + 1);
-  const unsigned char *p = (const unsigned char *)str->data;
-  size_t n = str->len, i = 0;
+  b_reserve(&b, scr_str_flat_view(str)->len + 1);
+  const unsigned char *p = (const unsigned char *)scr_str_flat_view(str)->data;
+  size_t n = scr_str_flat_view(str)->len, i = 0;
   while (i < n) {
     unsigned char c = p[i];
     uint32_t cp;
@@ -2338,7 +2338,7 @@ static ScrStr *gw_cstr(Gw *w, const char *s) { return gw_keep(w, scr_str_new(s, 
 
 static bool gw_eq_c(const ScrStr *s, const char *c) {
   size_t n = strlen(c);
-  return s->len == n && memcmp(s->data, c, n) == 0;
+  return scr_str_flat_view(s)->len == n && memcmp(scr_str_flat_view(s)->data, c, n) == 0;
 }
 
 /* ── path.join / resolve / dirname / basename / isAbsolute ────────────── */
@@ -2391,7 +2391,7 @@ static bool gw_is_absolute(ScrStr *p) {
 
 static size_t gw_hash(const ScrStr *k) {
   size_t h = 1469598103934665603u;
-  for (size_t i = 0; i < k->len; i++) h = (h ^ (unsigned char)k->data[i]) * 1099511628211u;
+  for (size_t i = 0; i < scr_str_flat_view(k)->len; i++) h = (h ^ (unsigned char)scr_str_flat_view(k)->data[i]) * 1099511628211u;
   return h;
 }
 
@@ -2401,7 +2401,7 @@ static GwSlot *gw_slot(GwMap *m, const ScrStr *key) {
   for (;;) {
     GwSlot *s = &m->slots[i];
     if (!s->key) return s;
-    if (s->key->len == key->len && memcmp(s->key->data, key->data, key->len) == 0) return s;
+    if (scr_str_flat_view(s->key)->len == scr_str_flat_view(key)->len && memcmp(scr_str_flat_view(s->key)->data, scr_str_flat_view(key)->data, scr_str_flat_view(key)->len) == 0) return s;
     i = (i + 1) & (m->cap - 1);
   }
 }
@@ -2543,7 +2543,7 @@ static GwStat *gw_stat(Gw *w, ScrStr *path) {
 #ifdef _WIN32
   int rc = stat(path->data, &st);
 #else
-  int rc = lstat(path->data, &st);
+  int rc = lstat(scr_str_flat_view(path)->data, &st);
 #endif
   GwStat *s = NULL;
   if (rc == 0) {
@@ -2560,7 +2560,7 @@ static bool gw_follow_is_dir(Gw *w, ScrStr *path) {
   void **hit = gw_get(&w->follow_stats, path);
   if (hit) return *hit != NULL;
   struct stat st;
-  bool dir = stat(path->data, &st) == 0 && S_ISDIR(st.st_mode);
+  bool dir = stat(scr_str_flat_view(path)->data, &st) == 0 && S_ISDIR(st.st_mode);
   gw_put(&w->follow_stats, path, dir ? (void *)1 : NULL);
   return dir;
 }
@@ -2762,7 +2762,7 @@ static void gw_add_subpatterns(Gw *w, ScrStr *path, GwPat *p) {
   if (is_last && gw_is_string(gw_at(p, -1))) {
     ScrStr *tail = gw_str_of(w, gw_at(p, -1)->str);
     GwStat *found = gw_stat(w, gw_join(w, fullpath, tail));
-    if (found && (tail->len || is_directory)) gw_result(w, gw_join(w, path, tail));
+    if (found && (scr_str_flat_view(tail)->len || is_directory)) gw_result(w, gw_join(w, path, tail));
     if (p->indexes.n == 1 && gw_idx_has(&p->indexes, (size_t)last)) return;
   } else if (is_last && gw_is_globstar(gw_at(p, -1)) &&
              (!gw_eq_c(path, ".") || gw_is_str(gw_at(p, 0), ".") || (last == 0 && st))) {
@@ -2807,7 +2807,7 @@ static void gw_add_subpatterns(Gw *w, ScrStr *path, GwPat *p) {
       bool from_symlink = !w->follow && gw_idx_has(&p->symlinks, index);
 
       if (gw_is_globstar(current)) {
-        bool is_dot = entry->name->len && entry->name->data[0] == '.';
+        bool is_dot = scr_str_flat_view(entry->name)->len && scr_str_flat_view(entry->name)->data[0] == '.';
         bool next_matches = gw_test(w, p, next_index, entry->name);
         size_t next_non_glob = next_index;
         while (gw_is_globstar(gw_at(p, (long)next_non_glob))) next_non_glob++;

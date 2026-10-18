@@ -2545,7 +2545,7 @@ bool scr_promise_payload_truthy(const ScrPromise *p) {
     case SCR_EXC_NONE: return false;
     case SCR_EXC_F64: return p->f64 != 0 && p->f64 == p->f64;
     case SCR_EXC_BOOL: return p->b;
-    case SCR_EXC_STR: return p->payload && ((const ScrStr *)p->payload)->len > 0;
+    case SCR_EXC_STR: return p->payload && scr_str_flat_view(((const ScrStr *)p->payload))->len > 0;
     default:
       if (p->retain_fn == scr_dyn_retain_v) return p->payload && scr_dyn_truthy(p->payload);
       return p->payload != NULL;
@@ -4727,12 +4727,12 @@ bool scr_report_unhandled_rejections(void) {
           break;
         }
         case SCR_EXC_BOOL: fputs(p->b ? "true" : "false", stderr); break;
-        case SCR_EXC_STR: fputs(((ScrStr *)p->payload)->data, stderr); break;
+        case SCR_EXC_STR: fputs(scr_str_flat_view(((ScrStr *)p->payload))->data, stderr); break;
         case SCR_EXC_OBJ:
           /* Error rejections render "name: message", like the uncaught path. */
           if (scr_error_is(p->payload)) {
             ScrStr *s = scr_error_to_string((ScrError *)p->payload);
-            fwrite(s->data, 1, s->len, stderr);
+            fwrite(scr_str_flat_view(s)->data, 1, scr_str_flat_view(s)->len, stderr);
             scr_str_release(s);
             break;
           }
