@@ -12,7 +12,7 @@
  * data is NUL-terminated for C convenience; len excludes the NUL.
  *
  * cap is the usable byte capacity of data[] excluding the NUL (allocation
- * is sizeof(ScrStr) + cap + 1); cap == len for interned literals and plain
+ * is sizeof(ScrStr) + cap + 1, plus the heap length cache below); cap == len for interned literals and plain
  * allocations. Builders and concat results may have spare capacity so
  * scr_str_concat can append in place when the left operand is uniquely
  * owned (rc == 1) — observable immutability is preserved: a string with
@@ -58,6 +58,29 @@ typedef struct ScrStr {
   char data[];
 } ScrStr;
 
+/* Heap strings with capacity > 64 reserve a uint32_t after data[cap]'s NUL
+ * slot for their UTF-16 length (UINT32_MAX = unknown). This survives index
+ * cache eviction without changing the three-word ABI or enlarging short
+ * strings. Capacity excludes this trailer, so builders cannot overwrite it.
+ * Immortal literals have no trailer and must never access it. Lengths fit
+ * in uint32_t because UTF-16 length <= byte length <= SCR_STR_MAX_CAP.
+ * memcpy permits the trailer's arbitrary byte alignment on every target. */
+static inline size_t scr_str_length_cache_size(size_t cap) {
+  return cap > 64 ? sizeof(uint32_t) : 0;
+}
+
+static inline void scr_str_length_cache_set(ScrStr *s, uint32_t length) {
+  if (s->rc != SIZE_MAX && s->cap > 64)
+    memcpy(s->data + s->cap + 1, &length, sizeof length);
+}
+
+static inline uint32_t scr_str_length_cache_get(const ScrStr *s) {
+  uint32_t length = UINT32_MAX;
+  if (s->rc != SIZE_MAX && s->cap > 64)
+    memcpy(&length, s->data + s->cap + 1, sizeof length);
+  return length;
+}
+
 /* The capacity word of a static string: cap == len, the proven-ASCII bit,
  * plus the precomputed 32-bit key hash where the header caches one (0
  * leaves it to be computed). */
@@ -71,13 +94,14 @@ typedef struct ScrStr {
 #endif
 
 void scr_str_hash_prime(ScrStr *s); /* scr_map.c; before a string becomes immortal */
-/* Forget every cached content fact (key hash, proven ASCII) before a
+/* Forget every cached content fact (key hash, proven ASCII, UTF-16 length) before a
  * uniquely owned string's bytes change. */
 static inline void scr_str_hash_forget(ScrStr *s) {
 #if SCR_STR_HASH_CACHE
   s->hash = 0;
 #endif
   s->ascii = 0;
+  scr_str_length_cache_set(s, UINT32_MAX);
 }
 
 /* True only when every byte is proven below 0x80 (see above). */

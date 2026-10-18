@@ -144,10 +144,13 @@ static void scr_sidx_register_cleanup(void) {
 #ifdef SCR_SIDX_TEST
 static SCR_TL size_t scr_sidx_walk_steps;
 static SCR_TL size_t scr_sidx_searches;
+static SCR_TL size_t scr_sidx_counted_bytes;
 void scr_sidx_test_reset_steps(void) {
   scr_sidx_walk_steps = 0;
   scr_sidx_searches = 0;
+  scr_sidx_counted_bytes = 0;
 }
+size_t scr_sidx_test_counted_bytes(void) { return scr_sidx_counted_bytes; }
 size_t scr_sidx_test_walk_steps(void) { return scr_sidx_walk_steps; }
 size_t scr_sidx_test_searches(void) { return scr_sidx_searches; }
 void scr_sidx_test_reset_cache(void) { scr_sidx_reset_all(); }
@@ -308,7 +311,7 @@ static void scr_sidx_concat_append(const ScrStr *s, size_t oldlen) {
 
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   if (len > cap || cap > SCR_STR_MAX_CAP) scr_oom();
-  ScrStr *s = scr_mem_alloc(sizeof(ScrStr) + cap + 1);
+  ScrStr *s = scr_mem_alloc(sizeof(ScrStr) + cap + 1 + scr_str_length_cache_size(cap));
   if (!s) scr_oom();
   s->rc = 1;
   s->len = len;
@@ -417,9 +420,10 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   scr_short_forget(s);
   scr_str_hash_forget(s);
   scr_sidx_purge(s); /* realloc may move; the old address may be recycled */
-  ScrStr *r = scr_mem_realloc(s, sizeof(ScrStr) + newcap + 1);
+  ScrStr *r = scr_mem_realloc(s, sizeof(ScrStr) + newcap + 1 + scr_str_length_cache_size(newcap));
   if (!r) scr_oom();
   r->cap = newcap;
+  scr_str_length_cache_set(r, UINT32_MAX);
   return r;
 }
 
@@ -1097,6 +1101,9 @@ static inline uint32_t scr_cp_low(uint32_t cp) { return 0xDC00 + ((cp - 0x10000)
  * up the word-at-a-time length fast path. */
 static size_t scr_utf16_units_span(const char *data, size_t len,
                                    bool *all_ascii) {
+#ifdef SCR_SIDX_TEST
+  scr_sidx_counted_bytes += len;
+#endif
   const unsigned char *d = (const unsigned char *)data;
   const uint64_t hibits = 0x8080808080808080ull;
   size_t units = 0, i = 0;
@@ -1264,6 +1271,7 @@ static void scr_sidx_rebuild_points(const ScrStr *s, ScrSidx *e) {
 static void scr_sidx_finish(const ScrStr *s, ScrSidx *e) {
   if (e->indexed_cb != s->len) return;
   e->u16len = e->indexed_cu;
+  scr_str_length_cache_set((ScrStr *)s, (uint32_t)e->u16len);
   if (e->u16len == s->len) { /* proven all ASCII: identity needs no index */
     if (s->rc != SIZE_MAX) {
       ((ScrStr *)s)->ascii = 1;
@@ -1316,6 +1324,8 @@ static void scr_sidx_materialize_identity_prefix(const ScrStr *s, ScrSidx *e) {
 static size_t scr_sidx_len(const ScrStr *s, ScrSidx *e) {
   if (s->ascii) return s->len;
   if (e->u16len != SCR_U16_UNKNOWN) return e->u16len;
+  uint32_t cached = scr_str_length_cache_get(s);
+  if (cached != UINT32_MAX) return e->u16len = cached;
   while (e->indexed_cb < s->len) scr_sidx_extend_one(s, e);
   scr_sidx_finish(s, e);
   return s->ascii ? s->len : e->u16len;
@@ -1812,6 +1822,8 @@ double scr_str_utf16_len(ScrStr *s) {
   /* A short receiver is counted directly: claiming an index entry for it
    * would evict the cursor of a long receiver being scanned meanwhile. */
   if (s->len <= 64) return (double)(int64_t)scr_utf16_units_short(s->data, s->len);
+  uint32_t cached = scr_str_length_cache_get(s);
+  if (cached != UINT32_MAX) return (double)cached;
   ScrSidx *last = scr_sidx_last; /* a scan's receiver, length known */
   if (last && last->s == s && last->u16len != SCR_U16_UNKNOWN)
     return (double)(int64_t)last->u16len; /* lengths fit int64_t */
@@ -2116,11 +2128,10 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
 
   if (!from_mid && !to_mid) {
     ScrStr *result = scr_str_from_span(s->data + from_b, content_len);
-    /* Unit boundaries already prove the exact output length. Preserve it
-     * instead of decoding a potentially megabyte-sized copy on .length.
-     * Index checkpoints remain lazy and owned by the result's cache slot. */
-    if (content_len >= SCR_SIDX_MIN_BYTES && !result->ascii)
-      scr_sidx(result)->u16len = to - from;
+    /* Unit boundaries prove the output length, even below the sparse-index
+     * threshold. Keep it with the allocation so arrays of slices retain it
+     * after eviction; navigation checkpoints remain lazy and bounded. */
+    scr_str_length_cache_set(result, (uint32_t)(to - from));
     return result;
   }
 
@@ -2135,6 +2146,7 @@ static ScrStr *scr_str_slice_units(ScrStr *s, ScrSidx *e,
   if (to_mid) scr_wtf8_put(r->data + o, scr_cp_high(scr_utf8_decode(s->data + to_b, &adv)));
   r->data[total] = '\0';
   r->ascii = 0;
+  scr_str_length_cache_set(r, (uint32_t)(to - from));
   return r;
 }
 

@@ -43,6 +43,7 @@ long scr_str_live_count(void); /* provided by scr_string.c */
 void scr_sidx_test_reset_steps(void);
 size_t scr_sidx_test_walk_steps(void);
 size_t scr_sidx_test_searches(void);
+size_t scr_sidx_test_counted_bytes(void);
 void scr_sidx_test_reset_cache(void);
 size_t scr_sidx_test_entries(void);
 size_t scr_sidx_test_points(void);
@@ -558,6 +559,56 @@ static void sparse_slice_churn_asserts(void) {
     sidx_fail("whole slice lost ownership");
   scr_str_release(whole);
   if (scr_sidx_test_active()) sidx_fail("slice churn left stale cache entries");
+}
+
+/* Pi retains 52 chunks before reading their lengths. This exceeds both
+ * index-cache tiers; preserving only the most recent slices cannot help.
+ * Count bytes, not wall time, so the performance assertion is deterministic.
+ * Failure cases: aligned and split-surrogate boundaries, cache eviction,
+ * in-place append, realloc, and reuse of a released builder allocation. */
+static void unicode_chunk_length_asserts(void) {
+  enum { CHUNKS = 52, CHUNK_UNITS = 8000 };
+  ScrStr *piece = scr_str_new("\xe6\xb1\x89\xe5\xad\x97\xf0\x9f\x98\x80", 10);
+  ScrStr *source = scr_str_repeat(piece, CHUNKS * CHUNK_UNITS / 4 + 1);
+  scr_str_release(piece);
+  for (size_t shift = 0; shift <= 3; shift += 3) {
+    ScrStr *chunks[CHUNKS];
+    for (size_t i = 0; i < CHUNKS; i++) {
+      size_t start = i * CHUNK_UNITS + shift;
+      chunks[i] = scr_str_slice(source, (double)start, (double)(start + CHUNK_UNITS));
+    }
+    scr_sidx_test_reset_cache();
+    scr_sidx_test_reset_steps();
+    for (size_t i = 0; i < CHUNKS; i++) {
+      if (scr_str_utf16_len(chunks[i]) != CHUNK_UNITS)
+        sidx_fail("Unicode chunk length changed after cache eviction");
+    }
+    if (scr_sidx_test_counted_bytes() != 0)
+      sidx_fail("Unicode chunks rescanned despite known slice lengths");
+    for (size_t i = 0; i < CHUNKS; i++) scr_str_release(chunks[i]);
+  }
+  scr_str_release(source);
+
+  /* A builder with spare capacity mutates without moving, then grows. */
+  ScrStr *s = scr_str_alloc_raw(100, 256);
+  for (size_t i = 0; i < 100; i += 2) memcpy(s->data + i, "\xc3\xa9", 2);
+  s->data[100] = '\0';
+  if (scr_str_utf16_len(s) != 50) sidx_fail("builder initial length");
+  ScrStr *suffix = scr_str_new("\xf0\x9f\x98\x80", 4);
+  ScrStr *joined = scr_str_concat(s, suffix);
+  if (joined != s || scr_str_utf16_len(joined) != 52)
+    sidx_fail("in-place append retained stale length");
+  scr_str_release(s);
+  scr_str_release(suffix);
+  joined = scr_str_regrow(joined, 1024);
+  if (scr_str_utf16_len(joined) != 52) sidx_fail("regrow retained stale length");
+  scr_str_release(joined);
+  s = scr_str_alloc_raw(512, 1024);
+  for (size_t i = 0; i < 512; i += 4) memcpy(s->data + i, "\xf0\x9f\x98\x80", 4);
+  s->data[512] = '\0';
+  if (scr_str_utf16_len(s) != 256) sidx_fail("spare reuse retained stale length");
+  scr_str_release(s);
+  if (scr_sidx_test_active()) sidx_fail("Unicode chunks left stale index entries");
 }
 
 static void index_activity_asserts(void) {
@@ -1160,6 +1211,7 @@ int main(int argc, char **argv) {
   sparse_append_threshold_asserts();
   index_activity_asserts();
   sparse_slice_churn_asserts();
+  unicode_chunk_length_asserts();
   local_navigation_asserts();
   positioned_suffix_eviction_asserts();
 #endif
