@@ -161,6 +161,7 @@ async function runtimeFingerprintInputGroups(
       { label: "runtime", dir: rtDir },
       { label: "ryu", dir: join(rtDir, "..", "vendor", "ryu") },
       { label: "quickjs-ng", dir: join(rtDir, "..", "vendor", "quickjs-ng") },
+      { label: "quickjs-strings", dir: join(rtDir, "..", "vendor", "quickjs-strings") },
       { label: "mbedtls", dir: join(rtDir, "..", "vendor", "mbedtls") },
       { label: "zlib", dir: join(rtDir, "..", "vendor", "zlib") },
       { label: "curl", dir: join(rtDir, "..", "vendor", "curl") },

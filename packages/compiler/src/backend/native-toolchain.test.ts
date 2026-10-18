@@ -559,9 +559,15 @@ test.skipIf(process.platform === "win32")(
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(projectDir),
         mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-          cp(join(originalRuntime, "..", "vendor", "ryu"), join(dir, "runtime", "vendor", "ryu"), {
-            recursive: true,
-          }),
+          Promise.all(
+            ["ryu", "quickjs-strings"].map((name) =>
+              cp(
+                join(originalRuntime, "..", "vendor", name),
+                join(dir, "runtime", "vendor", name),
+                { recursive: true },
+              ),
+            ),
+          ),
         ),
       ]);
       await mkdir(join(fakeRuntime, "sys"));
@@ -1005,9 +1011,15 @@ test.skipIf(process.platform === "win32")(
         mkdir(binDir),
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-          cp(join(originalRuntime, "..", "vendor", "ryu"), join(dir, "runtime", "vendor", "ryu"), {
-            recursive: true,
-          }),
+          Promise.all(
+            ["ryu", "quickjs-strings"].map((name) =>
+              cp(
+                join(originalRuntime, "..", "vendor", name),
+                join(dir, "runtime", "vendor", name),
+                { recursive: true },
+              ),
+            ),
+          ),
         ),
       ]);
       const numberSource = join(fakeRuntime, "scr_number.c");
@@ -2112,7 +2124,7 @@ test.skipIf(process.platform === "win32")(
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(join(fakeRuntimeRoot, "vendor"), { recursive: true }).then(() =>
           Promise.all(
-            ["quickjs-ng", "ryu"].map((name) =>
+            ["quickjs-ng", "ryu", "quickjs-strings"].map((name) =>
               cp(
                 join(originalRuntime, "..", "vendor", name),
                 join(fakeRuntimeRoot, "vendor", name),
@@ -2150,6 +2162,22 @@ test.skipIf(process.platform === "win32")(
         regex: true,
       });
       expect((await readdir(vendorRoot)).filter((name) => name.includes("-lre-"))).toHaveLength(2);
+
+      const stringHeader = join(fakeRuntimeRoot, "vendor", "quickjs-strings", "string.h");
+      const stamp = await stat(stringHeader);
+      const contents = await readFile(stringHeader, "utf8");
+      // The compiler probe must include textually consumed vendor headers,
+      // even when an edit preserves both byte length and timestamps.
+      await writeFile(stringHeader, contents.replace("QuickJS-NG", "QuickJS-ng"));
+      await utimes(stringHeader, stamp.atime, stamp.mtime);
+      await writeFile(cPath, "int main(void) { return 0; } /* third */\n");
+      await compileC({
+        cPath,
+        outPath: join(dir, "third"),
+        cacheIdentity: TEST_CACHE_IDENTITY,
+        regex: true,
+      });
+      expect((await readdir(vendorRoot)).filter((name) => name.includes("-lre-"))).toHaveLength(3);
     } finally {
       if (oldCacheDir === undefined) delete process.env["SCRIPTC_CACHE_DIR"];
       else process.env["SCRIPTC_CACHE_DIR"] = oldCacheDir;
@@ -2184,7 +2212,7 @@ test.skipIf(process.platform === "win32")(
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(fakeVendor, { recursive: true }).then(() =>
           Promise.all(
-            ["quickjs-ng", "ryu"].map((name) =>
+            ["quickjs-ng", "ryu", "quickjs-strings"].map((name) =>
               cp(join(originalRuntime, "..", "vendor", name), join(fakeVendor, name), {
                 recursive: true,
               }),
@@ -2895,9 +2923,13 @@ test.skipIf(process.platform === "win32")(
     await Promise.all([
       cp(originalRuntime, fakeRuntime, { recursive: true }),
       mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-        cp(join(originalRuntime, "..", "vendor", "ryu"), join(dir, "runtime", "vendor", "ryu"), {
-          recursive: true,
-        }),
+        Promise.all(
+          ["ryu", "quickjs-strings"].map((name) =>
+            cp(join(originalRuntime, "..", "vendor", name), join(dir, "runtime", "vendor", name), {
+              recursive: true,
+            }),
+          ),
+        ),
       ),
     ]);
 
